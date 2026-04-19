@@ -1,4 +1,4 @@
-# Adobe GenAI Creative Automation Platform
+# GenAI Creative Automation Platform
 
 > **AI-powered creative automation platform for generating localized, brand-compliant marketing assets at scale**
 
