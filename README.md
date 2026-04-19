@@ -10,7 +10,7 @@
 
 ## 🚀 Overview
 
-Adobe GenAI Creative Automation Platform is an enterprise-grade system that automates the creation of marketing assets using generative AI. It combines **multiple AI image generation backends** (Adobe Firefly, OpenAI DALL-E, Google Gemini) with **intelligent text localization** (Claude 3.5 Sonnet) and **legal compliance checking** to produce brand-consistent, legally compliant marketing materials across multiple locales and formats.
+GenAI Creative Automation Platform is an enterprise-grade system that automates the creation of marketing assets using generative AI. It combines **multiple AI image generation backends** (Adobe Firefly, OpenAI DALL-E, Google Gemini) with **intelligent text localization** (Claude 3.5 Sonnet) and **legal compliance checking** to produce brand-consistent, legally compliant marketing materials across multiple locales and formats.
 
 ### Key Capabilities
 
