@@ -1,0 +1,33 @@
+{
+  "enablement": {
+    "level": 3
+  },
+  "memory": {
+    "provider": "sqlite",
+    "embedding_provider": "auto",
+    "database_path": "agent-sentry/data/ops.db"
+  },
+  "save_points": {
+    "max_uncommitted_files_warning": 5,
+    "auto_commit_after_minutes": 30,
+    "auto_branch_on_risk_score": 8
+  },
+  "context_health": {
+    "context_percent_warning": 60,
+    "context_percent_critical": 80,
+    "message_count_warning": 20,
+    "message_count_critical": 30
+  },
+  "rules_file": {
+    "claude_md_max_lines": 300,
+    "required_sections": ["security", "error handling"]
+  },
+  "security": {
+    "block_on_secret_detection": true
+  },
+  "budget": {
+    "session_budget": "$25",
+    "monthly_budget": "$1000",
+    "warn_threshold": 0.80
+  }
+}

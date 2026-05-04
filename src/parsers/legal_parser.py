@@ -2,8 +2,11 @@
 import yaml
 import json
 from pathlib import Path
+import structlog
 from src.models import LegalComplianceGuidelines
 from src.parsers.brand_parser import BrandGuidelinesParser
+
+logger = structlog.get_logger(__name__)
 
 
 class LegalComplianceParser(BrandGuidelinesParser):
@@ -41,6 +44,5 @@ class LegalComplianceParser(BrandGuidelinesParser):
 
             # For now, return empty guidelines if no structured format
             # In the future, could use Claude to extract legal guidelines from text
-            print(f"⚠️  Unsupported format for legal guidelines: {path.suffix}")
-            print(f"   Please use YAML or JSON format")
+            logger.warning("legal_parser.unsupported_format", suffix=path.suffix, suggestion="Use YAML or JSON format")
             return LegalComplianceGuidelines(source_file=file_path)

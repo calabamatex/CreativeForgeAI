@@ -42,7 +42,7 @@ Your comprehensive GitHub repository has been created with all documentation, gu
 ## Repository Structure
 
 ```
-adobe-genai-project/
+CreativeForgeAI/
 ├── README.md                          ✅ Main entry point
 ├── ARCHITECTURE.md                    ✅ System design
 ├── FEATURES.md                        ✅ Feature matrix
@@ -78,7 +78,7 @@ adobe-genai-project/
 
 ```bash
 # 1. Navigate to project
-cd /Users/ethanallen/AdobeGenAIProject
+cd /path/to/CreativeForgeAI
 
 # 2. Initialize git (if not already initialized)
 git init
@@ -99,13 +99,13 @@ git commit -m "feat: initial commit with comprehensive documentation
 
 # 5. Create repository on GitHub
 # Go to https://github.com/new
-# Name: adobe-genai-project
+# Name: CreativeForgeAI
 # Description: AI-powered creative automation platform
 # Choose Public or Private
 # DO NOT initialize with README (we have one)
 
 # 6. Add remote and push
-git remote add origin https://github.com/YOUR_USERNAME/adobe-genai-project.git
+git remote add origin https://github.com/YOUR_USERNAME/CreativeForgeAI.git
 git branch -M main
 git push -u origin main
 ```
@@ -164,7 +164,7 @@ git push origin v1.0.0
 Then on GitHub:
 - Go to **Releases** → **Draft a new release**
 - Choose tag: **v1.0.0**
-- Title: **Adobe GenAI Platform v1.0.0**
+- Title: **Creative Automation Pipeline v1.0.0**
 - Copy description from CHANGELOG.md
 - Publish release
 
@@ -194,8 +194,8 @@ jobs:
 Update README.md with actual links:
 
 ```markdown
-[![Tests](https://github.com/YOUR_USERNAME/adobe-genai-project/workflows/Tests/badge.svg)](https://github.com/YOUR_USERNAME/adobe-genai-project/actions)
-[![Coverage](https://codecov.io/gh/YOUR_USERNAME/adobe-genai-project/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_USERNAME/adobe-genai-project)
+[![Tests](https://github.com/YOUR_USERNAME/CreativeForgeAI/workflows/Tests/badge.svg)](https://github.com/YOUR_USERNAME/CreativeForgeAI/actions)
+[![Coverage](https://codecov.io/gh/YOUR_USERNAME/CreativeForgeAI/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_USERNAME/CreativeForgeAI)
 ```
 
 ### 5. Setup GitHub Pages (Optional)

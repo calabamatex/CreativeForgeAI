@@ -98,7 +98,7 @@
 
 ### Campaign Analytics & Reporting
 
-**Enhanced in v1.3.0** - Comprehensive technical and business metrics
+**v1.3.0** - Technical metrics tracked per campaign run. (An earlier `BusinessMetrics` block tracking ROI / dollar savings / time-saved was removed because the calculations were tautologies derived from hard-coded constants. See `docs/ENHANCED_REPORTING.md`.)
 
 #### Technical Metrics (17 fields)
 
@@ -115,22 +115,6 @@
 | Memory monitoring | ✅ | Peak memory usage (MB) |
 | System information | ✅ | Platform, Python version, CPU |
 | Error stack traces | ✅ | Full debugging information |
-
-#### Business Metrics (13 fields)
-
-| Feature | Status | Description |
-|---------|--------|-------------|
-| Time saved | ✅ | Hours & percentage vs manual |
-| Cost savings | ✅ | Percentage & dollar estimates |
-| ROI multiplier | ✅ | Return on investment calculation |
-| Labor hours saved | ✅ | Estimated human hours saved |
-| Compliance pass rate | ✅ | Percentage passing validation |
-| Asset reuse efficiency | ✅ | Cache utilization percentage |
-| Localization efficiency | ✅ | Assets per hour throughput |
-| Time per locale | ✅ | Average processing time |
-| Time per asset | ✅ | Average generation time |
-| Manual cost baseline | ✅ | Estimated manual production cost |
-| Estimated savings | ✅ | Dollar value saved |
 
 #### Report Management
 
@@ -210,10 +194,7 @@
 | **Hero image reuse savings** | 50%+ | 70-90% |
 | **Memory usage** | <2GB | <1GB |
 | **API success rate** | >95% | 98%+ |
-| **Enhanced reporting overhead** | <50ms | 20-30ms |
-| **Time saved vs manual** | 80%+ | 95-99% |
-| **Cost savings** | 70%+ | 80-90% |
-| **ROI multiplier** | 5x+ | 8-12x |
+| **Reporting overhead** | <50ms | 20-30ms |
 
 ---
 

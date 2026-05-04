@@ -13,8 +13,8 @@ The Creative Automation Pipeline supports multiple GenAI image generation backen
   - Multiple aspect ratios
   - Style references
   - Content credentials
-- **Requirements**: Firefly API Key + Client ID
-- **Cost**: Pay-per-use via Adobe
+- **Requirements**: Firefly API Key + Client ID + OAuth IMS access token (see Adobe Firefly Services docs)
+- **Cost**: Pay-per-use; pricing per Adobe Firefly Services billing
 
 ### 2. OpenAI DALL-E 3
 - **Model**: DALL-E 3

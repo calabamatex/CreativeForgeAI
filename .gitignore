@@ -48,6 +48,7 @@ output/
 
 # Test coverage
 .coverage
+coverage.xml
 .pytest_cache/
 htmlcov/
 *.cover
@@ -80,6 +81,7 @@ desktop.ini
 # Documentation builds
 docs/_build/
 docs/.doctrees/
+docs/*.pdf
 site/
 
 # Jupyter Notebook
@@ -96,8 +98,23 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Node.js
+node_modules/
+
+# Frontend build output
+frontend/dist/
+
+# Uploads
+uploads/
+
 # Backup files
 *.backup
 *_backup.*
 examples/campaigns/*_2026-*.json
 examples/campaigns/*_2025-*.json
+
+# Agent build-time state (local; do not commit)
+.claude-flow/
+.swarm/
+.claude/
+.mcp.json

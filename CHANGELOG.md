@@ -183,40 +183,8 @@ output/
   - Full command-line interface with preset selection
   - Example campaign: `examples/premium_tech_campaign_p1.json`
 
-- 📊 **Presentation Materials**
-  - `TECHNICAL_PRESENTATION.md` - 60+ slide deep technical presentation for developers
-  - `EXECUTIVE_PRESENTATION.md` - 35+ slide business-focused presentation for executives
-  - `EXECUTIVE_5PAGE_VISUAL.md` - 5-page investor presentation focused on numbers and graphs
-  - `PRODUCT_5PAGE_DECK.md` - 5-page product showcase with industry-relevant messaging
-  - `PRESENTATION_GUIDE.md` - Guide for using and customizing presentations
-  - `EXECUTIVE_PRESENTATION_GUIDE.md` - Executive presentation usage guide with Q&A prep
-  - `PRESENTATIONS_README.md` - Overview of all presentation materials
-  - Executive version covers: ROI, competitive advantage, architecture, roadmap, financials
-  - Technical version covers: implementation details, code examples, testing, operations
-  - 5-page investor: 12 GenAI prompts for financial charts, growth graphs, and metrics
-  - 5-page product: 5 GenAI prompts for feature visualization, comparison charts, and pricing
-  - Multiple audience formats with export options (PDF, PowerPoint, HTML)
-
-- 📄 **Executive Materials Suite**
-  - `EXECUTIVE_SUMMARY_ONE_PAGE.md` - Comprehensive one-page executive summary
-    - Problem, solution, market opportunity ($12B TAM)
-    - Key metrics table (70-90% savings, $4.2M ARR)
-    - Competitive advantage and moat
-    - Financial projections (both scenarios)
-    - Go-to-market strategy (3 phases)
-    - Investment ask ($2.5M seed round)
-    - Risk mitigation strategies
-    - Next steps and timeline
-  - `FINANCIAL_MODEL_3YEAR.csv` - Detailed financial spreadsheet
-    - Year 1 monthly breakdown (both conservative and target scenarios)
-    - Years 2-3 quarterly projections
-    - Conservative: $960k ARR → $4.85M ARR (Year 3)
-    - Target: $4.26M ARR → $22.1M ARR (Year 3)
-    - Unit economics dashboard (LTV/CAC: 6.1-6.5x)
-    - Pricing tier breakdown (Starter/Professional/Enterprise)
-    - Headcount plan (3 → 36 people over 3 years)
-    - Key assumptions and sensitivity analysis
-    - Funding requirements and use of funds
+- 📊 **Presentation Materials (subsequently removed)**
+  - Multiple presentation/exec-deck markdown files were added in this release. They have been removed in a later cleanup pass because they contained Adobe trade-dress claims, fabricated TAM/financial projections, and tautological ROI figures that did not reflect what the implementation actually does. See the Removed section below for details.
 
 ### Changed
 - Updated `ComprehensiveBrandGuidelines` model with new fields
@@ -244,8 +212,8 @@ output/
 
 ### Added
 
-- 📊 **Enhanced Campaign Reporting System**
-  - `TechnicalMetrics` data model with 17 advanced technical fields
+- 📊 **Campaign Reporting System**
+  - `TechnicalMetrics` data model with 17 technical fields
     - Backend tracking, API call statistics, cache hit/miss rates
     - Retry count and detailed retry reasons
     - API response time metrics (avg, min, max)
@@ -253,54 +221,41 @@ output/
     - Peak memory usage monitoring
     - System environment information
     - Full error stack traces for debugging
-  - `BusinessMetrics` data model with 13 business-relevant fields
-    - Time saved vs manual process (hours and percentage)
-    - Cost savings percentage and dollar estimates
-    - ROI multiplier calculation
-    - Labor hours saved calculation
-    - Compliance pass rate tracking
-    - Asset reuse efficiency metrics
-    - Localization efficiency scoring (assets per hour)
-    - Average processing time per locale and per asset
-  - Updated `CampaignOutput` model with optional metrics fields
-  - Enhanced `pipeline.py` with comprehensive metric collection
+  - Updated `CampaignOutput` model with optional `technical_metrics` field
+  - Enhanced `pipeline.py` with metric collection during execution
   - Real-time memory usage tracking with psutil
-  - Automated business metric calculations
 - 📁 **Reorganized Campaign Reports**
   - New centralized directory: `output/campaign_reports/`
-  - Enhanced filename format: `campaign_report_CAMPAIGN_ID_PRODUCT_ID_YYYY-MM-DD.json`
-  - Historical report preservation with timestamps
-  - No report overwrites - full audit trail maintained
-- 🖥️ **Enhanced Console Output**
+  - Filename format: `campaign_report_CAMPAIGN_ID_PRODUCT_ID_YYYY-MM-DD.json`
+  - Historical report preservation with timestamps (no overwrites within a single day's runs are deduped on the date stamp)
+- 🖥️ **Console Output**
   - Technical metrics summary display
-  - Business metrics summary display
   - Cache efficiency and API performance visibility
-  - ROI and cost savings information in real-time
+
+### Removed (post-release cleanup)
+- `BusinessMetrics` data model and the corresponding ROI / cost-savings / time-saved console output. The earlier version computed these from hard-coded constants (`manual_baseline_hours = 96.0`, `manual_baseline_cost = 2700.0`, `cost_savings_percentage = 80.0 + cache_bonus`), which made the reported "ROI multiplier" algebraically `0.80 / 0.20 = 4.0` by construction regardless of workload. The values were tautologies, not measurements, so they have been removed. To produce honest business metrics, the implementation would need real per-call API cost data, a measured manual-production baseline, and a defined cost-of-time input — none of which are wired in.
 
 ### Changed
 - Updated `src/storage.py` `save_report()` method
   - Reports now saved to centralized `campaign_reports/` directory
   - Filename includes both campaign ID and product ID
-  - Date timestamp prevents overwrites
+  - Date timestamp prevents overwrites across different days
 - Enhanced `src/pipeline.py` orchestration
   - Added psutil for memory monitoring
   - Tracks API response times for all calls
   - Calculates cache hit/miss rates
   - Monitors image processing, localization, and compliance timing
-  - Computes comprehensive business ROI metrics
 - Updated imports in `src/models.py`
   - Added `Optional` type hint for new optional fields
 
 ### Performance
 - Memory tracking: ~5-10ms overhead per product
 - Metric calculation: ~15-20ms total overhead
-- **Total enhanced reporting overhead: ~20-30ms per campaign** (negligible)
+- **Total reporting overhead: ~20-30ms per campaign** (negligible)
 
 ### Benefits
-- **Complete audit trail** - Historical reports with timestamps
-- **ROI visibility** - Clear business value metrics
+- **Audit trail** - Historical reports with timestamps
 - **Performance insights** - Detailed technical metrics for optimization
-- **Cost tracking** - Estimated savings vs manual production
 - **Efficiency monitoring** - Cache utilization and processing speed
 - **Debugging support** - Full error traces and system info
 
@@ -408,7 +363,7 @@ None currently.
 
 ## Links
 
-- [GitHub Repository](https://github.com/yourusername/adobe-genai-project)
-- [Documentation](https://github.com/yourusername/adobe-genai-project/tree/main/docs)
-- [Issues](https://github.com/yourusername/adobe-genai-project/issues)
-- [Releases](https://github.com/yourusername/adobe-genai-project/releases)
+- [GitHub Repository](https://github.com/calabamatex/CreativeForgeAI)
+- [Documentation](https://github.com/calabamatex/CreativeForgeAI/tree/main/docs)
+- [Issues](https://github.com/calabamatex/CreativeForgeAI/issues)
+- [Releases](https://github.com/calabamatex/CreativeForgeAI/releases)

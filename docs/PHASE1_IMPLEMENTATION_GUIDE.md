@@ -8,7 +8,7 @@
 
 ## Overview
 
-Phase 1 enhancement features have been successfully implemented, adding powerful new capabilities to the Adobe GenAI Creative Automation Platform:
+Phase 1 enhancement features have been successfully implemented, adding powerful new capabilities to the Creative Automation Pipeline:
 
 1. **Per-Element Text Control** - Independent styling for headline, subheadline, and CTA
 2. **Text Outline Effects** - Improved readability on any background

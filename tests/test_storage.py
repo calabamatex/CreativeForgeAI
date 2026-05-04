@@ -73,20 +73,31 @@ class TestStorageManager:
     def test_save_report(self, mock_env_vars, tmp_path, monkeypatch):
         """Test saving campaign report."""
         from src.storage import StorageManager
-        from src.models import CampaignOutput
+        from src.models import CampaignOutput, GeneratedAsset
 
         monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
 
         storage = StorageManager()
         storage.create_campaign_directory("TEST")
 
+        assets = [
+            GeneratedAsset(
+                product_id="PROD-001",
+                locale="en-US",
+                aspect_ratio="1:1",
+                file_path="/tmp/test.png",
+                generation_method="firefly",
+            )
+        ]
+
         output = CampaignOutput(
             campaign_id="TEST",
             campaign_name="Test Campaign",
-            total_assets=5
+            generated_assets=assets,
+            total_assets=1,
         )
 
-        report_path = storage.save_report(output, "TEST")
+        report_path = storage.save_report(output, "TEST", "PROD-001")
 
         assert report_path.exists()
         assert report_path.suffix == ".json"
@@ -95,7 +106,7 @@ class TestStorageManager:
         with open(report_path) as f:
             data = json.load(f)
             assert data["campaign_id"] == "TEST"
-            assert data["total_assets"] == 5
+            assert data["total_assets"] == 1
 
     def test_directory_structure(self, mock_env_vars, tmp_path, monkeypatch):
         """Test complete directory structure creation."""
@@ -147,9 +158,8 @@ class TestStorageManager:
             img = Image.new('RGB', (100, 100), color='blue')
             storage.save_image(img, path)
 
-        # List assets
-        campaign_dir = tmp_path / "TEST"
-        assets = list(campaign_dir.rglob("*.png"))
+        # List assets - assets are stored under output_dir/product_id/campaign_id/...
+        assets = list(tmp_path.rglob("*.png"))
 
         assert len(assets) == 3
 
@@ -197,7 +207,7 @@ class TestStorageIntegration:
             products_processed=["P1", "P2"]
         )
 
-        report_path = storage.save_report(output, "FULL-TEST")
+        report_path = storage.save_report(output, "FULL-TEST", "P1")
 
         # Verify everything
         assert len(assets) == 8  # 2 locales * 2 products * 2 ratios

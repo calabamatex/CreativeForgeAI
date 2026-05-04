@@ -4,9 +4,12 @@ import asyncio
 import base64
 import json
 from typing import Optional
+import structlog
 from src.genai.base import ImageGenerationService
 from src.models import ComprehensiveBrandGuidelines
 from src.config import get_config
+
+logger = structlog.get_logger(__name__)
 
 
 class GeminiImageService(ImageGenerationService):
@@ -32,9 +35,13 @@ class GeminiImageService(ImageGenerationService):
     ) -> bytes:
         """Generate image using Gemini Imagen 4."""
 
-        # Enhance prompt with brand guidelines
+        # Sanitize and enhance prompt with brand guidelines
         if brand_guidelines:
             prompt = self._build_brand_compliant_prompt(prompt, brand_guidelines)
+        else:
+            prompt = self._sanitize_prompt(prompt)
+
+        logger.debug("gemini.prompt", prompt=prompt)
 
         # Parse size
         width, height = map(int, size.split('x'))
@@ -68,40 +75,36 @@ class GeminiImageService(ImageGenerationService):
 
         for attempt in range(self.max_retries):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        self.api_url,
-                        headers=headers,
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=60)
-                    ) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            # Imagen predict endpoint returns base64 encoded images
-                            # Response format: {"predictions": [{"bytesBase64Encoded": "..."}]}
-                            if 'predictions' in data:
-                                image_b64 = data['predictions'][0]['bytesBase64Encoded']
-                            else:
-                                raise Exception(f"Unexpected response format: {data.keys()}")
-                            return base64.b64decode(image_b64)
-
-                        elif response.status == 429:
+                session = await self._get_session()
+                async with session.post(
+                    self.api_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if "predictions" in data:
+                            image_b64 = data["predictions"][0]["bytesBase64Encoded"]
+                        else:
+                            logger.error("gemini.unexpected_response", keys=list(data.keys()))
+                            raise Exception("Gemini API returned an unexpected response format")
+                        return base64.b64decode(image_b64)
+                    elif response.status == 429:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    else:
+                        error_text = await response.text()
+                        logger.warning("gemini.api_error", status=response.status, error=error_text)
+                        if attempt < self.max_retries - 1:
                             await asyncio.sleep(2 ** attempt)
                             continue
-                        else:
-                            error_text = await response.text()
-                            print(f"Gemini API error: {response.status} - {error_text}")
-                            if attempt < self.max_retries - 1:
-                                await asyncio.sleep(2 ** attempt)
-                                continue
-                            raise Exception(f"Gemini API error: {response.status}")
-
+                        raise Exception(f"Gemini API error: {response.status}")
             except asyncio.TimeoutError:
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                     continue
                 raise
-
         raise Exception("Max retries exceeded for Gemini API")
     
     def _get_aspect_ratio(self, width: int, height: int) -> str:

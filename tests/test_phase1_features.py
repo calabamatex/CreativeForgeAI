@@ -11,7 +11,7 @@ from src.models import (
     ComprehensiveBrandGuidelines,
     CampaignMessage
 )
-from src.image_processor_v2 import ImageProcessorV2
+from src.image_processor import ImageProcessorV2
 
 
 class TestTextElementStyle:
