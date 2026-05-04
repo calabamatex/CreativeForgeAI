@@ -1,0 +1,61 @@
+{
+  "campaign_id": "SUMMER2026-3",
+  "campaign_name": "Summer Tech Collection 2026",
+  "brand_name": "TechStyle",
+  "target_market": "North America",
+  "target_audience": "Young professionals and tech enthusiasts aged 25-40",
+  "campaign_message": {
+    "locale": "en-US",
+    "headline": "Elevate Your Summer Sound",
+    "subheadline": "Experience Premium Audio Quality Anywhere",
+    "cta": "Shop Now"
+  },
+  "products": [
+    {
+      "product_id": "HEADPHONES-001",
+      "product_name": "Premium Wireless Headphones",
+      "product_description": "High-fidelity wireless headphones with active noise cancellation, 40-hour battery life, and premium audio quality. PURE AWESOME!",
+      "product_category": "Audio Electronics",
+      "key_features": [
+        "Active Noise Cancellation",
+        "40-hour battery life",
+        "Premium audio quality",
+        "Comfortable over-ear design"
+      ],
+      "generation_prompt": "professional product photo of premium wireless headphones, sleek modern design, black matte finish, studio lighting",
+      "existing_assets": {
+      }
+    },
+    {
+      "product_id": "SMARTWATCH-002",
+      "product_name": "Fitness Smartwatch Pro",
+      "product_description": "Advanced fitness tracker with heart rate monitoring, GPS, and smart notifications",
+      "product_category": "Wearable Technology",
+      "key_features": [
+        "Heart rate monitoring",
+        "Built-in GPS",
+        "Water resistant",
+        "7-day battery life"
+      ],
+      "existing_assets": {
+      },
+      "generation_prompt": "professional product photo of sleek fitness smartwatch, modern design, black and silver, lifestyle composition"
+    }
+  ],
+  "aspect_ratios": [
+    "1:1",
+    "9:16",
+    "16:9"
+  ],
+  "output_formats": [
+    "png"
+  ],
+  "image_generation_backend": "gemini",
+  "brand_guidelines_file": "examples/guidelines/brand_guidelines.md",
+  "localization_guidelines_file": "examples/guidelines/localization_rules.yaml",
+  "enable_localization": true,
+  "target_locales": [
+    "en-US",
+    "es-MX"
+  ]
+}

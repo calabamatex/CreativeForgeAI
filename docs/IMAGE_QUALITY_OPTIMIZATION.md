@@ -1,6 +1,6 @@
 # Image Quality Optimization Guide
 
-## Maximizing Generated Image Quality in Adobe GenAI Platform
+## Maximizing Generated Image Quality in Creative Automation Pipeline
 
 This guide provides strategies, techniques, and best practices for achieving the highest quality images from AI generation backends.
 

@@ -1,6 +1,6 @@
 # Scripts Directory
 
-Utility scripts for Adobe GenAI Creative Automation Platform.
+Utility scripts for Creative Automation Pipeline.
 
 ## Campaign Brief Generator
 
@@ -198,6 +198,265 @@ PROMPT_TEMPLATES = {
 ```
 
 Then add a corresponding `generate_your_category_campaign()` function following the existing patterns.
+
+## Campaign Brief Generator with Phase 1 Enhancements
+
+**File:** `generate_campaign_brief_p1_updates.py`
+
+Enhanced version of the campaign brief generator that includes **Phase 1 features** (v1.2.0):
+- **Per-element text customization** (headline, subheadline, CTA)
+- **Text outline effects** for improved readability
+- **Post-processing configuration** (sharpening, color correction)
+
+### Phase 1 Features
+
+#### Text Customization Presets
+
+The script includes 4 text styling presets:
+
+1. **high_contrast_bold** (default for premium_audio)
+   - Bold headlines with strong shadows
+   - Clean subheadline without effects
+   - Orange CTA with outline and background box
+
+2. **readability_first** (default for premium_tech)
+   - Text outlines on all elements
+   - Maximum readability on any background
+   - No shadow effects needed
+
+3. **minimal_modern** (default for fashion)
+   - Clean design without shadows
+   - Dark text on light backgrounds
+   - Minimal visual effects
+
+4. **premium_luxury**
+   - Elegant styling with gold accents
+   - Sophisticated shadow effects
+   - Premium aesthetic
+
+#### Post-Processing Presets
+
+The script includes 4 enhancement presets:
+
+1. **standard** - Balanced (150% sharp, +10% contrast, +5% saturation)
+2. **subtle** - Gentle (125% sharp, +5% contrast, +3% saturation)
+3. **vivid** - Bold (175% sharp, +20% contrast, +15% saturation)
+4. **professional** (default) - Strong (160% sharp, +15% contrast, +10% saturation)
+
+### Usage
+
+#### List Available Presets
+
+```bash
+python3 scripts/generate_campaign_brief_p1_updates.py --list-presets
+```
+
+**Output:**
+```
+🎨 Phase 1 Text Customization Presets:
+  - high_contrast_bold
+  - readability_first
+  - minimal_modern
+  - premium_luxury
+
+✨ Phase 1 Post-Processing Presets:
+  - standard
+  - subtle
+  - vivid
+  - professional
+```
+
+#### Generate Campaign Briefs with Phase 1 Features
+
+**Premium Audio Campaign (with high contrast text and professional post-processing):**
+```bash
+python3 scripts/generate_campaign_brief_p1_updates.py --template premium_audio --output examples/premium_audio_p1.json
+```
+
+**Premium Tech Campaign (with readability-focused text and vivid enhancement):**
+```bash
+python3 scripts/generate_campaign_brief_p1_updates.py --template premium_tech --text-preset readability_first --post-preset vivid --output examples/premium_tech_p1.json
+```
+
+**Fashion Campaign (with minimal design and subtle enhancement):**
+```bash
+python3 scripts/generate_campaign_brief_p1_updates.py --template fashion --text-preset minimal_modern --post-preset subtle --output examples/fashion_p1.json
+```
+
+#### Custom Preset Combinations
+
+Mix and match text and post-processing presets:
+
+```bash
+# High contrast text with vivid post-processing
+python3 scripts/generate_campaign_brief_p1_updates.py \
+  --template premium_audio \
+  --text-preset high_contrast_bold \
+  --post-preset vivid
+
+# Minimal text with standard post-processing
+python3 scripts/generate_campaign_brief_p1_updates.py \
+  --template fashion \
+  --text-preset minimal_modern \
+  --post-preset standard
+
+# Luxury text with professional post-processing
+python3 scripts/generate_campaign_brief_p1_updates.py \
+  --template premium_tech \
+  --text-preset premium_luxury \
+  --post-preset professional
+```
+
+### Generated Output Structure (Phase 1 Enhanced)
+
+In addition to the standard campaign structure, Phase 1 briefs include:
+
+```json
+{
+  "campaign_id": "PREMIUM_AUDIO_2026_P1",
+  "products": [...],
+
+  "text_customization": {
+    "headline": {
+      "color": "#FFFFFF",
+      "font_size_multiplier": 1.3,
+      "font_weight": "bold",
+      "shadow": {
+        "enabled": true,
+        "color": "#000000",
+        "offset_x": 4,
+        "offset_y": 4,
+        "blur_radius": 2
+      }
+    },
+    "subheadline": {
+      "color": "#E0E0E0",
+      "font_size_multiplier": 1.0,
+      "font_weight": "regular",
+      "shadow": {
+        "enabled": false
+      }
+    },
+    "cta": {
+      "color": "#FFFFFF",
+      "font_size_multiplier": 1.1,
+      "font_weight": "bold",
+      "outline": {
+        "enabled": true,
+        "color": "#FF6600",
+        "width": 2
+      },
+      "background": {
+        "enabled": true,
+        "color": "#FF6600",
+        "opacity": 0.9,
+        "padding": 18
+      }
+    }
+  },
+
+  "post_processing": {
+    "enabled": true,
+    "sharpening": true,
+    "sharpening_radius": 2.0,
+    "sharpening_amount": 160,
+    "color_correction": true,
+    "contrast_boost": 1.15,
+    "saturation_boost": 1.1
+  }
+}
+```
+
+### Command-Line Arguments
+
+| Argument | Description | Required |
+|----------|-------------|----------|
+| `--template` | Campaign template: `premium_audio`, `premium_tech`, `fashion` | Yes |
+| `--output` | Output JSON file path (default: `examples/{template}_campaign_p1.json`) | No |
+| `--text-preset` | Text customization preset (default: template-specific) | No |
+| `--post-preset` | Post-processing preset (default: template-specific) | No |
+| `--list-presets` | List all available presets | No |
+| `--list-templates` | List available templates | No |
+| `--pretty` | Pretty print JSON (default: True) | No |
+
+### Default Preset Combinations
+
+Each template has optimized defaults:
+
+| Template | Default Text Preset | Default Post-Processing |
+|----------|-------------------|------------------------|
+| premium_audio | high_contrast_bold | professional |
+| premium_tech | readability_first | vivid |
+| fashion | minimal_modern | subtle |
+
+### Integration with Phase 1 Pipeline
+
+Generated Phase 1 briefs are fully compatible with the v1.2.0 pipeline:
+
+```bash
+# Generate Phase 1 enhanced brief
+python3 scripts/generate_campaign_brief_p1_updates.py --template premium_tech
+
+# Process with Phase 1 features
+./run_cli.sh examples/premium_tech_campaign_p1.json gemini
+
+# Output includes:
+# - Per-element text styling (headline, subheadline, CTA)
+# - Text outlines for improved readability
+# - Automatic post-processing enhancement
+```
+
+### Quality Improvements with Phase 1
+
+Using Phase 1 features typically results in:
+
+- **Improved text readability** across all backgrounds
+- **Professional polish** through post-processing
+- **Consistent brand styling** with per-element control
+- **Reduced post-production work** with automatic enhancement
+- **Better conversion rates** from more readable CTAs
+
+### Example Workflows
+
+**High-Impact Campaign (Maximum Visibility):**
+```bash
+python3 scripts/generate_campaign_brief_p1_updates.py \
+  --template premium_audio \
+  --text-preset readability_first \
+  --post-preset vivid
+./run_cli.sh examples/premium_audio_campaign_p1.json firefly
+```
+
+**Professional Campaign (Balanced Approach):**
+```bash
+python3 scripts/generate_campaign_brief_p1_updates.py \
+  --template premium_tech \
+  --text-preset high_contrast_bold \
+  --post-preset professional
+./run_cli.sh examples/premium_tech_campaign_p1.json gemini
+```
+
+**Clean Minimal Campaign (Modern Design):**
+```bash
+python3 scripts/generate_campaign_brief_p1_updates.py \
+  --template fashion \
+  --text-preset minimal_modern \
+  --post-preset subtle
+./run_cli.sh examples/fashion_campaign_p1.json dalle
+```
+
+### Backward Compatibility
+
+Phase 1 features are optional enhancements. Campaign briefs generated by the original script remain fully compatible. The Phase 1 enhanced script adds:
+
+- `text_customization` object (optional, overrides legacy text settings)
+- `post_processing` object (optional, applied automatically when present)
+
+### Documentation References
+
+- [PHASE1_IMPLEMENTATION_GUIDE.md](../docs/PHASE1_IMPLEMENTATION_GUIDE.md) - Complete Phase 1 feature guide
+- [TEXT_CUSTOMIZATION.md](../docs/TEXT_CUSTOMIZATION.md) - Text effect documentation
+- [IMAGE_QUALITY_OPTIMIZATION.md](../docs/IMAGE_QUALITY_OPTIMIZATION.md) - Quality optimization guide
 
 ## Additional Scripts
 

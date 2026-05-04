@@ -4,6 +4,9 @@ import os
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -98,7 +101,7 @@ class Config:
         
         if warnings:
             for warning in warnings:
-                print(f"⚠️  Warning: {warning}")
+                logger.warning("config.validation_warning", warning=warning)
         
         return len(errors) == 0, errors
     

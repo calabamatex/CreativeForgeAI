@@ -3,18 +3,21 @@ import aiohttp
 import json
 import asyncio
 from typing import Dict, Any, Optional
+import structlog
 from src.config import get_config
 from src.models import ComprehensiveBrandGuidelines, LocalizationGuidelines, CampaignMessage
+from src.security import sanitize_prompt
+
+logger = structlog.get_logger(__name__)
 
 
 class ClaudeService:
     """Service for interacting with Anthropic Claude API."""
-    
+
     def __init__(self, api_key: Optional[str] = None, max_retries: int = 3):
         config = get_config()
         self.api_key = api_key or config.CLAUDE_API_KEY
 
-        # Validate API key is provided
         if not self.api_key:
             raise ValueError(
                 "CLAUDE_API_KEY is required. Set it in environment variables or pass to constructor."
@@ -23,6 +26,31 @@ class ClaudeService:
         self.api_url = config.CLAUDE_API_URL
         self.max_retries = max_retries
         self.model = "claude-sonnet-4-20250514"
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            timeout = aiohttp.ClientTimeout(
+                total=120,
+                connect=10,
+                sock_read=60,
+            )
+            connector = aiohttp.TCPConnector(
+                limit=20,
+                limit_per_host=10,
+                ttl_dns_cache=300,
+                enable_cleanup_closed=True,
+            )
+            self._session = aiohttp.ClientSession(
+                timeout=timeout,
+                connector=connector,
+            )
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
     
     async def extract_brand_guidelines(
         self,
@@ -160,9 +188,7 @@ Make it culturally appropriate and engaging for {target_locale} market."""
                 cta=data.get('cta', original_message.cta)
             )
         except (json.JSONDecodeError, ValueError) as e:
-            # Print debug info and fallback to original
-            print(f"⚠️  Localization failed for {target_locale}: {e}")
-            print(f"⚠️  Response was: {response_text[:200]}")
+            logger.warning("claude.localization_failed", locale=target_locale, error=str(e), response_preview=response_text[:200])
             return CampaignMessage(
                 locale=target_locale,
                 headline=original_message.headline,
@@ -171,7 +197,12 @@ Make it culturally appropriate and engaging for {target_locale} market."""
             )
     
     async def _call_claude(self, prompt: str) -> str:
-        """Make API call to Claude with retry logic."""
+        """Make API call to Claude with retry logic.
+
+        The prompt is sanitized (control characters stripped, length capped)
+        before being sent to the API.
+        """
+        prompt = sanitize_prompt(prompt, max_length=16_000)  # Claude can handle longer context
         headers = {
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
@@ -186,30 +217,29 @@ Make it culturally appropriate and engaging for {target_locale} market."""
         
         for attempt in range(self.max_retries):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        self.api_url,
-                        headers=headers,
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=30)
-                    ) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            # Safely extract response with validation
-                            try:
-                                return data['content'][0]['text']
-                            except (KeyError, IndexError, TypeError) as e:
-                                raise ValueError(f"Unexpected Claude API response format: {e}")
-                        elif response.status == 429:
+                session = await self._get_session()
+                async with session.post(
+                    self.api_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        try:
+                            return data["content"][0]["text"]
+                        except (KeyError, IndexError, TypeError) as e:
+                            raise ValueError(f"Unexpected Claude API response format: {e}")
+                    elif response.status == 429:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    else:
+                        error_text = await response.text()
+                        logger.warning("claude.api_error", status=response.status, error=error_text)
+                        if attempt < self.max_retries - 1:
                             await asyncio.sleep(2 ** attempt)
                             continue
-                        else:
-                            error_text = await response.text()
-                            print(f"Claude API error: {response.status} - {error_text}")
-                            if attempt < self.max_retries - 1:
-                                await asyncio.sleep(2 ** attempt)
-                                continue
-                            raise Exception(f"Claude API error: {response.status}")
+                        raise Exception(f"Claude API error: {response.status}")
             except asyncio.TimeoutError:
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)

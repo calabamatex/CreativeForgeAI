@@ -2,9 +2,12 @@
 import aiohttp
 import asyncio
 from typing import Optional
+import structlog
 from src.genai.base import ImageGenerationService
 from src.models import ComprehensiveBrandGuidelines
 from src.config import get_config
+
+logger = structlog.get_logger(__name__)
 
 
 class OpenAIImageService(ImageGenerationService):
@@ -27,10 +30,14 @@ class OpenAIImageService(ImageGenerationService):
     ) -> bytes:
         """Generate image using DALL-E 3."""
         
-        # Enhance prompt with brand guidelines
+        # Sanitize and enhance prompt with brand guidelines
         if brand_guidelines:
             prompt = self._build_brand_compliant_prompt(prompt, brand_guidelines)
-        
+        else:
+            prompt = self._sanitize_prompt(prompt)
+
+        logger.debug("openai.prompt", prompt=prompt)
+
         # DALL-E 3 accepts: 1024x1024, 1024x1792, 1792x1024
         dalle_size = self._convert_size_format(size)
         
@@ -50,42 +57,35 @@ class OpenAIImageService(ImageGenerationService):
         
         for attempt in range(self.max_retries):
             try:
-                async with aiohttp.ClientSession() as session:
-                    # Generate image
-                    async with session.post(
-                        self.api_url,
-                        headers=headers,
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=60)
-                    ) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            image_url = data['data'][0]['url']
-                            
-                            # Download image
-                            async with session.get(image_url) as img_response:
-                                if img_response.status == 200:
-                                    return await img_response.read()
-                                else:
-                                    raise Exception(f"Image download failed: {img_response.status}")
-                        
-                        elif response.status == 429:
+                session = await self._get_session()
+                async with session.post(
+                    self.api_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        image_url = data["data"][0]["url"]
+                        async with session.get(image_url) as img_response:
+                            if img_response.status == 200:
+                                return await img_response.read()
+                            raise Exception(f"Image download failed: {img_response.status}")
+                    elif response.status == 429:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    else:
+                        error_text = await response.text()
+                        logger.warning("openai.api_error", status=response.status, error=error_text)
+                        if attempt < self.max_retries - 1:
                             await asyncio.sleep(2 ** attempt)
                             continue
-                        else:
-                            error_text = await response.text()
-                            print(f"OpenAI API error: {response.status} - {error_text}")
-                            if attempt < self.max_retries - 1:
-                                await asyncio.sleep(2 ** attempt)
-                                continue
-                            raise Exception(f"OpenAI API error: {response.status}")
-            
+                        raise Exception(f"OpenAI API error: {response.status}")
             except asyncio.TimeoutError:
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                     continue
                 raise
-        
         raise Exception("Max retries exceeded for OpenAI API")
     
     def _convert_size_format(self, size: str) -> str:

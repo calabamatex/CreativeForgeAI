@@ -3,15 +3,16 @@ import click
 import json
 import asyncio
 from pathlib import Path
+from src import __version__
 from src.pipeline import CreativeAutomationPipeline
 from src.models import CampaignBrief
 from src.config import get_config
 
 
 @click.group()
-@click.version_option(version="1.0.0")
+@click.version_option(version=__version__)
 def cli():
-    """Creative Automation Pipeline - Adobe GenAI POC
+    """Creative Automation Pipeline - Reference Implementation
 
     Generate localized social media advertising assets using GenAI.
     """
@@ -127,7 +128,7 @@ def list_examples():
                 click.echo(f"  • {example_file.name}")
                 if 'campaign_name' in data:
                     click.echo(f"    {data['campaign_name']}")
-        except:
+        except (json.JSONDecodeError, KeyError, OSError):
             pass
     
     click.echo(f"\nUsage: python -m src.cli process --brief examples/campaign_brief.json\n")

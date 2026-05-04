@@ -4,8 +4,11 @@ import docx
 import re
 from pathlib import Path
 from typing import List
+import structlog
 from src.genai.claude import ClaudeService
 from src.models import ComprehensiveBrandGuidelines
+
+logger = structlog.get_logger(__name__)
 
 
 class BrandGuidelinesParser:
@@ -35,8 +38,7 @@ class BrandGuidelinesParser:
         try:
             return await self.claude_service.extract_brand_guidelines(text, file_path)
         except Exception as e:
-            print(f"⚠️  Claude extraction failed: {e}")
-            print(f"⚠️  Falling back to regex-based extraction")
+            logger.warning("brand_parser.claude_extraction_failed", error=str(e), fallback="regex")
             return self._extract_with_regex(text, file_path)
     
     def _extract_pdf(self, file_path: str) -> str:

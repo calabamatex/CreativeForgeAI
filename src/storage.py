@@ -1,12 +1,19 @@
 """Storage management for campaign outputs."""
 import json
+import re
 import shutil
 from pathlib import Path
 from PIL import Image
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
+import structlog
 from src.models import CampaignOutput, CampaignBrief
 from src.config import get_config
+from src.exceptions import StorageError
+
+logger = structlog.get_logger(__name__)
+
+_SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9._\-]+$")
 
 
 class StorageManager:
@@ -15,13 +22,26 @@ class StorageManager:
     def __init__(self):
         self.config = get_config()
         self.output_dir = self.config.OUTPUT_DIR
-    
+
+    @staticmethod
+    def _sanitize_component(value: str, name: str) -> str:
+        """Sanitize a single path component to prevent directory traversal."""
+        if ".." in value or "/" in value or "\\" in value:
+            raise StorageError(
+                message=f"Invalid characters in {name}: {value!r}",
+                detail="Path components must not contain '..', '/', or '\\\\'",
+            )
+        if not value:
+            raise StorageError(message=f"Empty {name} is not allowed")
+        return value
+
     def create_campaign_directory(self, campaign_id: str) -> Path:
         """Create campaign output directory structure."""
+        self._sanitize_component(campaign_id, "campaign_id")
         campaign_dir = self.output_dir / campaign_id
         campaign_dir.mkdir(parents=True, exist_ok=True)
         return campaign_dir
-    
+
     def get_asset_path(
         self,
         campaign_id: str,
@@ -31,6 +51,11 @@ class StorageManager:
         format: str = "png"
     ) -> Path:
         """Generate path for campaign asset."""
+        # Validate all path components
+        self._sanitize_component(campaign_id, "campaign_id")
+        self._sanitize_component(locale, "locale")
+        self._sanitize_component(product_id, "product_id")
+
         # Normalize aspect ratio for directory name
         ratio_dir = aspect_ratio.replace(":", "x")
 
@@ -109,7 +134,7 @@ class StorageManager:
             raise FileNotFoundError(f"Campaign brief not found: {brief_path}")
 
         # Generate UTC timestamp for backup filename
-        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
         backup_name = f"{brief_file.stem}_{timestamp}{brief_file.suffix}"
         backup_path = brief_file.parent / backup_name
 
@@ -180,4 +205,4 @@ class StorageManager:
         with open(brief_file, 'w') as f:
             json.dump(brief_data, f, indent=2)
 
-        print(f"✓ Updated campaign brief: {brief_file}")
+        logger.info("storage.brief_updated", path=str(brief_file))

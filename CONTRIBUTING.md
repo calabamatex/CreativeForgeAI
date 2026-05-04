@@ -1,4 +1,4 @@
-# Contributing to Adobe GenAI Creative Automation Platform
+# Contributing to Creative Automation Pipeline
 
 Thank you for considering contributing! This document provides guidelines for contributing to the project.
 
@@ -20,8 +20,8 @@ Thank you for considering contributing! This document provides guidelines for co
 
 ```bash
 # Fork on GitHub, then clone
-git clone https://github.com/your username/adobe-genai-project.git
-cd adobe-genai-project
+git clone https://github.com/your username/CreativeForgeAI.git
+cd CreativeForgeAI
 ```
 
 ### 2. Create Feature Branch
@@ -281,8 +281,8 @@ pre-commit run --all-files
 
 ## Questions?
 
-- **Issues:** [GitHub Issues](https://github.com/yourusername/adobe-genai-project/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/yourusername/adobe-genai-project/discussions)
+- **Issues:** [GitHub Issues](https://github.com/calabamatex/CreativeForgeAI/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/calabamatex/CreativeForgeAI/discussions)
 
 ---
 

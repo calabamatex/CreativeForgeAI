@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The Adobe GenAI Creative Automation Platform is built on a modular, layered architecture that separates concerns and enables flexible extension.
+The Creative Automation Pipeline is built on a modular, layered architecture that separates concerns and enables flexible extension.
 
 ## High-Level Architecture
 
@@ -516,8 +516,8 @@ pip install -r requirements.txt
 
 ### 2. Docker Deployment
 ```bash
-docker build -t adobe-genai .
-docker run -v ./output:/app/output adobe-genai campaign.json
+docker build -t creative-forge-ai .
+docker run -v ./output:/app/output creative-forge-ai campaign.json
 ```
 
 ### 3. Cloud Functions (AWS Lambda)
@@ -534,17 +534,17 @@ def lambda_handler(event, context):
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: adobe-genai
+  name: creative-forge-ai
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: adobe-genai
+      app: creative-forge-ai
   template:
     spec:
       containers:
       - name: pipeline
-        image: adobe-genai:latest
+        image: creative-forge-ai:latest
 ```
 
 ---

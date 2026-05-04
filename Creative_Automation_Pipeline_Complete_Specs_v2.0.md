@@ -117,15 +117,13 @@ The system will:
 - **Post-Processing:** Color correction, brightness, contrast, saturation adjustments
 - **Backward Compatibility:** Legacy single-message format still supported
 
-### 1.9 Enhanced Campaign Reporting (v1.3.0 - January 19, 2026)
-- **30 Comprehensive Metrics:** 17 technical + 13 business metrics tracked per campaign
-- **Technical Metrics:** API performance, cache efficiency, memory usage, processing times
-- **Business Metrics:** ROI tracking (8-12x multiplier), cost savings (80-90%), time savings (95-99%)
+### 1.9 Campaign Reporting (v1.3.0 - January 19, 2026)
+- **17 Technical Metrics:** Tracked per campaign — API performance, cache efficiency, memory usage, processing times
 - **Centralized Reports:** Timestamped JSON reports in `output/campaign_reports/`
 - **Historical Tracking:** Complete audit trail without overwrites
-- **Multi-Audience Value:** Metrics for Engineers, Product Managers, Finance, and Compliance teams
 - **Performance Overhead:** <30ms impact (negligible)
 - **System Monitoring:** psutil integration for real-time resource tracking
+- **Note:** An earlier `BusinessMetrics` block (ROI multiplier, cost savings, time-saved) was removed in this implementation because the values were tautologies derived from hard-coded constants, not measurements. See Section 11.3.
 
 ---
 
@@ -269,8 +267,6 @@ The system will:
 **REQ-F-031: Centralized Campaign Reports** - Store timestamped reports in `output/campaign_reports/` (v1.3.0).
 
 **REQ-F-032: Technical Metrics Tracking** - Track 17 technical performance metrics per campaign (v1.3.0).
-
-**REQ-F-033: Business Metrics Tracking** - Track 13 business ROI metrics per campaign (v1.3.0).
 
 ---
 
@@ -533,37 +529,16 @@ class TechnicalMetrics(BaseModel):
 - Resource utilization tracking
 - Cache optimization strategies
 
-### 11.3 Business Metrics (13 Fields)
+### 11.3 Business Metrics — Removed
 
-**Data Model:**
-```python
-class BusinessMetrics(BaseModel):
-    time_saved_vs_manual_hours: float          # Time saved (hours)
-    time_saved_percentage: float               # Time saved percentage (0-100)
-    cost_savings_percentage: float             # Cost savings percentage (0-100)
-    manual_baseline_cost: float                # Manual production baseline ($2,700)
-    estimated_manual_cost: float               # Estimated cost for this campaign manually
-    estimated_savings: float                   # Dollar value saved
-    roi_multiplier: float                      # ROI multiplier (savings/cost)
-    labor_hours_saved: float                   # Human labor hours saved
-    compliance_pass_rate: float                # Compliance pass rate (0-100)
-    asset_reuse_efficiency: float              # Cache utilization (0-100)
-    avg_time_per_locale_seconds: float         # Average time per locale
-    avg_time_per_asset_seconds: float          # Average time per asset
-    localization_efficiency_score: float       # Assets per hour
-```
+Earlier versions of this specification described a `BusinessMetrics` block tracking ROI multiplier, dollar savings, time saved vs. manual baseline, and labor hours saved. This block has been removed because the calculations were tautologies, not measurements:
 
-**Calculation Methodology:**
-- **Time Savings:** Baseline 96 hours (4 days) manual production
-- **Cost Savings:** 80% base + cache bonus (up to 95%)
-- **ROI Multiplier:** estimated_savings / actual_cost
-- **Manual Baseline:** $2,700 for 36 assets
+- `manual_baseline_hours = 96.0` was a hard-coded constant with no source
+- `manual_baseline_cost = 2700.0` was a hard-coded constant with no source
+- `cost_savings_percentage = 80.0 + cache_bonus` was an assumption returned as output
+- `roi_multiplier = estimated_savings / (estimated_manual_cost - estimated_savings)` was algebraically `0.80 / 0.20 = 4.0` by construction, regardless of actual workload
 
-**Use Cases:**
-- ROI demonstration for stakeholders
-- Budget planning and cost analysis
-- Process efficiency tracking
-- Compliance monitoring
+To produce honest business metrics, the implementation would need: (a) per-call API cost from each provider's billing, (b) a measured manual-production baseline at the deploying organization, and (c) a defined cost-of-time input. None of those are wired in.
 
 ### 11.4 Report Structure
 
@@ -581,19 +556,11 @@ class BusinessMetrics(BaseModel):
   "processing_time_seconds": 45.3,
   "success_rate": 1.0,
   "technical_metrics": {
-    "backend_used": "firefly",
+    "backend_used": "gemini",
     "total_api_calls": 2,
     "cache_hit_rate": 0.0,
     "avg_api_response_time_ms": 1250.5,
     "peak_memory_mb": 342.5,
-    ...
-  },
-  "business_metrics": {
-    "time_saved_vs_manual_hours": 95.2,
-    "time_saved_percentage": 99.1,
-    "cost_savings_percentage": 80.0,
-    "roi_multiplier": 4.0,
-    "compliance_pass_rate": 100.0,
     ...
   }
 }
@@ -628,9 +595,6 @@ class BusinessMetrics(BaseModel):
 | Metric | Target | Actual (v1.3.0) |
 |--------|--------|-----------------|
 | Performance overhead | <50ms | ~25ms |
-| Time savings | 80%+ | 95-99% |
-| Cost savings | 70%+ | 80-90% |
-| ROI multiplier | 5x+ | 8-12x |
 | Reporting coverage | 100% | 100% |
 
 ---
@@ -978,18 +942,14 @@ psutil>=5.9.0                                # v1.3.0 - Memory and resource trac
 | Processing speed | <3 min (2 products, 2 locales) | ~45 seconds |
 | Code coverage | ≥80% | 93% |
 
-### v1.3.0 Enhanced Reporting Metrics
+### v1.3.0 Reporting Metrics
 
 | Metric | Target | Actual |
 |--------|--------|--------|
-| Metrics tracked | 20+ | 30 (17 technical + 13 business) |
-| Time savings vs manual | 80%+ | 95-99% |
-| Cost savings | 70%+ | 80-90% |
-| ROI multiplier | 5x+ | 8-12x |
+| Technical metrics tracked | 15+ | 17 |
 | Reporting overhead | <50ms | ~25ms |
-| Asset reuse efficiency | 50%+ | 70-90% |
-| Localization efficiency | 25+ assets/hour | 35-40 assets/hour |
-| Compliance pass rate | 90%+ | 100% |
+| Asset reuse (cache) hit rate | depends on workload | varies per run |
+| Localization throughput | depends on locale count | varies per run |
 
 ---
 
@@ -1029,8 +989,6 @@ psutil>=5.9.0                                # v1.3.0 - Memory and resource trac
 
 **Enhanced Reporting (v1.3.0):**
 - **Technical Metrics** - 17 performance and debugging metrics
-- **Business Metrics** - 13 ROI and efficiency metrics
-- **ROI Multiplier** - Return on investment (savings/cost ratio)
 - **Cache Hit Rate** - Percentage of reused vs generated assets
 - **Localization Efficiency** - Assets generated per hour
 
@@ -1056,9 +1014,6 @@ psutil>=5.9.0                                # v1.3.0 - Memory and resource trac
 - FINRA Guidelines: https://www.finra.org/rules-guidance
 
 **Project Documentation:**
-- Technical Deep Dive: `docs/Adobe-GenAI-Creative-Automation-Platform-Technical-Deep-Dive.pdf`
-- Executive Brief: `docs/Adobe-GenAI-Creative-Automation-Platform-Technical-Executive-Brief.pdf`
-- Comprehensive Guide: `docs/Adobe-GenAI-Creative-Automation-Platform_Comprehensive.pdf`
 - Enhanced Reporting: `docs/ENHANCED_REPORTING.md`
 - Features: `docs/FEATURES.md`
 - Video Tutorials: `docs/videos/`
@@ -1077,7 +1032,7 @@ psutil>=5.9.0                                # v1.3.0 - Memory and resource trac
   - Real-time metrics visualization dashboard (building on v1.3.0)
   - Advanced ML-based compliance checking with NLP
   - Multi-cloud storage integration (AWS S3, Azure Blob, GCP Storage)
-  - Historical ROI comparison and trend analysis
+  - Historical performance comparison and trend analysis
   - Smart recommendations based on past campaign performance
   - Automated A/B test result analysis
 
@@ -1098,7 +1053,7 @@ psutil>=5.9.0                                # v1.3.0 - Memory and resource trac
 |---------|------|---------|
 | 1.0 | 2026-01-13 | Initial specification |
 | 2.0 | 2026-01-13 | Added external guidelines, localization, parsers |
-| 2.1 | 2026-01-19 | Added v1.3.0 Enhanced Campaign Reporting (30 metrics, ROI tracking, centralized reports, psutil integration) |
+| 2.1 | 2026-01-19 | Added v1.3.0 reporting (technical metrics, centralized reports, psutil integration) |
 | 2.2 | 2026-01-19 | **Comprehensive Update:** Multi-backend support (Firefly, DALL-E 3, Gemini Imagen 4), legal compliance system (FTC, FDA, SEC/FINRA), Phase 1 enhancements (per-element text control, advanced styling, post-processing), complete file structure reorganization, expanded test coverage, updated dependencies, and comprehensive documentation across all sections |
 
 ---
@@ -1182,7 +1137,6 @@ psutil>=5.9.0                                # v1.3.0 - Memory and resource trac
 - [x] Add psutil dependency for system monitoring
 - [x] Integrate memory tracking in pipeline
 - [x] Track API call metrics (timing, retries, cache)
-- [x] Calculate ROI and cost savings (8-12x multiplier)
 - [x] Generate centralized timestamped reports
 - [x] Report filename format: campaign_report_{CAMPAIGN}_{PRODUCT}_{DATE}.json
 - [x] Console output formatting (technical + business metrics)
@@ -1210,6 +1164,6 @@ psutil>=5.9.0                                # v1.3.0 - Memory and resource trac
 
 **This specification provides a complete, production-ready blueprint for building an enterprise-grade Creative Automation Pipeline with external guidelines integration, multi-locale support, and comprehensive campaign reporting (v1.3.0). All components, APIs, data models, and workflows are fully specified for autonomous implementation by Claude or development teams.**
 
-**Current Implementation Status:** v1.3.0 deployed (January 19, 2026) with 30 metrics tracking, 8-12x ROI, 95-99% time savings, and 93% test coverage.
+**Current Implementation Status:** v1.3.0 reference implementation. Verified end-to-end against Google Gemini Imagen 4. OpenAI DALL-E 3 and Adobe Firefly backends are implemented but not validated against live providers. Test coverage of 93% reflects line coverage of mocked HTTP calls; live integration paths are not asserted.
 
 **END OF SPECIFICATION DOCUMENT v2.1**

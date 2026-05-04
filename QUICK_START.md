@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get up and running with Adobe GenAI Creative Automation Platform in 5 minutes.
+Get up and running with Creative Automation Pipeline in 5 minutes.
 
 ---
 
@@ -15,8 +15,8 @@ Get up and running with Adobe GenAI Creative Automation Platform in 5 minutes.
 ## Step 1: Clone Repository
 
 ```bash
-git clone https://github.com/yourusername/adobe-genai-project.git
-cd adobe-genai-project
+git clone https://github.com/calabamatex/CreativeForgeAI.git
+cd CreativeForgeAI
 ```
 
 ---
@@ -216,5 +216,5 @@ nano my_brand.yaml
 ## Getting Help
 
 - **Documentation:** [Full Docs](docs/)
-- **Issues:** [GitHub Issues](https://github.com/yourusername/adobe-genai-project/issues)
+- **Issues:** [GitHub Issues](https://github.com/calabamatex/CreativeForgeAI/issues)
 - **Examples:** `examples/campaigns/` directory

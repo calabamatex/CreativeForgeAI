@@ -54,15 +54,13 @@
   "output_formats": [
     "png"
   ],
-  "image_generation_backend": "firefly",
+  "image_generation_backend": "gemini",
   "brand_guidelines_file": "examples/guidelines/brand_guidelines.md",
   "localization_guidelines_file": "examples/guidelines/localization_rules.yaml",
   "enable_localization": true,
   "target_locales": [
     "en-US",
     "es-MX",
-    "fr-FR",
-    "de-DE",
-    "ja-JP"
+    "de-DE"
   ]
 }
