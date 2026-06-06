@@ -145,7 +145,7 @@ That's it! Your assets will be generated in `output/[PRODUCT_ID]/[CAMPAIGN_ID]/`
 ## 📚 Documentation
 
 ### Core Documentation
-- **[QUICK_START.md](QUICK_START.md)** - Step-by-step setup guide
+- **[QUICKSTART.md](QUICKSTART.md)** - Step-by-step setup guide
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and components
 - **[FEATURES.md](FEATURES.md)** - Complete feature matrix
 - **[API.md](docs/API.md)** - API reference
