@@ -112,8 +112,12 @@ cd adobe-genai-project
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (full app: API + worker + S3 storage)
+# Dependencies are defined in pyproject.toml — the single source of truth.
+pip install -e ".[api,worker,s3]"
+
+# CLI pipeline only:        pip install -e "."
+# Contributors (lint/types/tests): pip install -e ".[api,worker,s3,dev]"
 ```
 
 ### 2. Configure API Keys
