@@ -263,6 +263,33 @@ output/
 
 ## [Unreleased]
 
+### Documentation — feature-claim reconciliation (P1-T4)
+- 📝 **Removed the unsubstantiated Business/ROI metric claims from the README.** The
+  headline features and the `Enhanced Campaign Reporting` section previously
+  advertised a `business_metrics` block with sample output (`roi_multiplier: 9.0`,
+  `estimated_savings: 1800.0`, `Cost Savings: 80.0% (Est. $1,800.00 saved)`,
+  `ROI Multiplier: 9.0x`, etc.). Those values were tautologies derived from
+  hard-coded constants (a fixed 96-hour manual baseline and a fixed $2,700 manual
+  cost) and never reflected real measurements — the `compute_business_metrics()`
+  helper and `BusinessMetrics` model had already been removed from
+  `src/pipeline_metrics.py`. The README now matches the code: the fabricated
+  sample JSON/CLI output is gone and ROI is described only in a clearly-labeled
+  **Roadmap → Honest business metrics** section that states the three real inputs
+  (per-call API billing data, a measured manual baseline, a cost-of-time input)
+  required to compute it honestly.
+- 🔶 **Tagged not-yet-real features as "(in progress)"** in the README so readers
+  aren't misled, to be flipped to "done" when each is delivered: **native
+  multi-format generation** (today one square hero is generated and cropped to
+  1:1 / 16:9 / 9:16), **real cost & API-call metrics** (the API metrics endpoints
+  return placeholder zeros for `api_calls`, `cache_hit_rate`, and
+  `cost_estimate_usd`), and **live WebSocket progress** (currently a fixed
+  heartbeat, not true per-step progress).
+- 🧹 Replaced fixed "70% reduction / 90% faster" asset-reuse figures with
+  qualitative statements (the actual reduction depends on the cache-hit rate,
+  which is reported in the technical metrics).
+- ℹ️ `docs/ENHANCED_REPORTING.md` and `FEATURES.md` already documented the
+  business-metrics removal honestly and were left unchanged.
+
 ### Planned for 1.4.0 (Phase 2)
 - [ ] Video generation support
 - [ ] Web UI for campaign preview
