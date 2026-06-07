@@ -272,7 +272,9 @@ class BrandResponse(BaseModel):
 class ComplianceReportResponse(BaseModel):
     id: uuid.UUID
     campaign_id: uuid.UUID
-    is_compliant: bool
+    # ``None`` means the campaign was NOT checked (no legal guidelines
+    # configured). It does NOT mean compliant. See ``summary.status``.
+    is_compliant: bool | None
     violations: list[dict[str, Any]]
     summary: dict[str, Any]
     checked_at: datetime

@@ -88,6 +88,14 @@ class ServiceUnavailableError(AppError):
     error_type = "service_unavailable"
 
 
+class InternalServerError(AppError):
+    status_code = 500
+    error_type = "internal_error"
+
+    def __init__(self, detail: str = "An internal error occurred", **extra: Any) -> None:
+        super().__init__(detail, **extra)
+
+
 # ---------------------------------------------------------------------------
 # RFC 7807 Problem Details response builder
 # ---------------------------------------------------------------------------

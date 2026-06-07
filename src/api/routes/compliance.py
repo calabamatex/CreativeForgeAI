@@ -16,7 +16,7 @@ from src.api.dependencies import (
     get_db,
     require_role,
 )
-from src.api.errors import BadRequestError, NotFoundError
+from src.api.errors import BadRequestError, InternalServerError, NotFoundError
 from src.api.schemas import (
     ComplianceApproveRequest,
     ComplianceReportResponse,
@@ -58,44 +58,149 @@ async def _get_latest_report(campaign_id: uuid.UUID, db: AsyncSession):
     return result.scalar_one_or_none()
 
 
-async def _run_compliance_check(campaign, db: AsyncSession) -> dict:
-    """Execute the compliance check pipeline for a campaign.
+def _serialize_violation(v) -> dict:
+    """Convert a :class:`ComplianceViolation` dataclass into a JSON-safe dict."""
+    return {
+        "severity": v.severity,
+        "category": v.category,
+        "field": v.field,
+        "violation": v.violation,
+        "message": v.message,
+        "suggestion": v.suggestion,
+    }
 
-    Delegates to the existing ``legal_checker`` module when available,
-    otherwise returns a synthetic passing report.
+
+def _build_campaign_message(brief: dict):
+    """Build a :class:`CampaignMessage` from a campaign brief dict.
+
+    The brief stores the default message under ``campaign_message`` (see
+    :class:`src.models.campaign.CampaignBrief`). Older/partial briefs may store
+    the headline fields at the top level, so we fall back to that shape.
     """
-    violations: list[dict] = []
-    is_compliant = True
-    summary: dict = {}
+    from src.models import CampaignMessage  # noqa: E402
 
-    try:
-        from src.legal_checker import LegalChecker
+    msg = brief.get("campaign_message")
+    if isinstance(msg, dict) and msg:
+        return CampaignMessage(**msg)
 
-        brief = campaign.brief or {}
-        checker = LegalChecker()
-        result = checker.check_content(brief)
+    # Fallback: assemble from top-level keys. ``CampaignMessage`` requires
+    # non-empty headline/subheadline/cta, so default missing ones to a single
+    # space to keep the checker runnable without fabricating content.
+    return CampaignMessage(
+        locale=brief.get("locale", "en-US"),
+        headline=brief.get("headline") or " ",
+        subheadline=brief.get("subheadline") or " ",
+        cta=brief.get("cta") or " ",
+    )
 
-        if hasattr(result, "violations") and result.violations:
-            for v in result.violations:
-                violations.append({
-                    "severity": v.get("severity", "error"),
-                    "code": v.get("code", "LEGAL_001"),
-                    "message": v.get("message", str(v)),
-                    "field": v.get("field"),
-                    "locale": v.get("locale"),
-                })
 
-        has_errors = any(v["severity"] == "error" for v in violations)
-        is_compliant = not has_errors
-        summary = {
-            "total_checks": len(violations) if violations else 1,
-            "errors": sum(1 for v in violations if v["severity"] == "error"),
-            "warnings": sum(1 for v in violations if v["severity"] == "warning"),
+def _gather_product_contents(brief: dict) -> list[dict]:
+    """Extract per-product content dicts (description + features) from a brief."""
+    products = brief.get("products") or []
+    contents: list[dict] = []
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+        contents.append({
+            "description": product.get("product_description", ""),
+            "features": product.get("key_features", []) or [],
+        })
+    return contents
+
+
+async def _run_compliance_check(campaign, db: AsyncSession) -> dict:
+    """Execute the REAL legal compliance check for a campaign.
+
+    Loads the campaign's stored legal guidelines (``campaign.legal_guidelines``),
+    runs :class:`src.legal_checker.LegalComplianceChecker` against the brief's
+    campaign message and product content, and returns the truthful verdict.
+
+    Returns a dict with keys ``is_compliant`` (``True``/``False``/``None``),
+    ``violations`` and ``summary``. ``is_compliant is None`` means the campaign
+    was NOT checked because no guidelines are configured -- this must never be
+    presented as compliant.
+
+    Raises:
+        InternalServerError: If the configured guidelines are malformed or the
+            checker fails unexpectedly. The error is surfaced as a 5xx and is
+            NEVER masked as a passing report.
+    """
+    from src.legal_checker import LegalComplianceChecker  # noqa: E402
+    from src.models import LegalComplianceGuidelines  # noqa: E402
+
+    raw_guidelines = getattr(campaign, "legal_guidelines", None)
+
+    # No guidelines configured -> explicit "not checked" state. NOT compliant.
+    if not raw_guidelines or not isinstance(raw_guidelines, dict):
+        logger.info("compliance.not_checked", campaign_id=str(campaign.id))
+        return {
+            "is_compliant": None,
+            "violations": [],
+            "summary": {
+                "status": "not_checked",
+                "message": "not checked — no legal guidelines configured",
+            },
         }
 
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("compliance.check_error", campaign_id=str(campaign.id), error=str(exc))
-        summary = {"error": str(exc), "fallback": True}
+    brief = campaign.brief or {}
+
+    # Construct the guidelines + checker. A malformed guidelines blob is a
+    # server-side configuration error, not a pass.
+    try:
+        guidelines = LegalComplianceGuidelines(**raw_guidelines)
+    except (TypeError, ValueError) as exc:
+        logger.error(
+            "compliance.guidelines_invalid",
+            campaign_id=str(campaign.id),
+            error=str(exc),
+        )
+        raise InternalServerError(
+            detail="Configured legal guidelines are invalid and could not be loaded."
+        ) from exc
+
+    # Build the message + product content from the brief. A malformed brief is
+    # likewise a server-side error, never a silent pass.
+    try:
+        message = _build_campaign_message(brief)
+        product_contents = _gather_product_contents(brief)
+        locales = brief.get("target_locales") or campaign.target_locales or ["en-US"]
+        locale = locales[0] if locales else "en-US"
+    except (TypeError, ValueError, KeyError) as exc:
+        logger.error(
+            "compliance.brief_invalid",
+            campaign_id=str(campaign.id),
+            error=str(exc),
+        )
+        raise InternalServerError(
+            detail="Campaign brief is invalid and could not be compliance-checked."
+        ) from exc
+
+    checker = LegalComplianceChecker(guidelines)
+
+    # Run the checker over the message and every product. Accumulate ALL
+    # violations across passes so the persisted report is complete.
+    is_compliant, message_violations = checker.check_content(
+        message, product_content=None, locale=locale
+    )
+    all_violations = list(message_violations)
+
+    for product_content in product_contents:
+        product_compliant, product_violations = checker.check_content(
+            message, product_content=product_content, locale=locale
+        )
+        if not product_compliant:
+            is_compliant = False
+        all_violations.extend(product_violations)
+
+    violations = [_serialize_violation(v) for v in all_violations]
+    summary = {
+        "status": "checked",
+        "total_violations": len(violations),
+        "errors": sum(1 for v in violations if v["severity"] == "error"),
+        "warnings": sum(1 for v in violations if v["severity"] == "warning"),
+        "info": sum(1 for v in violations if v["severity"] == "info"),
+        "guidelines_source": raw_guidelines.get("source_file"),
+    }
 
     return {
         "is_compliant": is_compliant,
@@ -202,6 +307,16 @@ async def approve_compliance(
 
     if report is None:
         raise NotFoundError("ComplianceReport", f"campaign:{campaign_id}")
+
+    # A "not checked" report (is_compliant is None) was never actually
+    # evaluated -- approving it would mask the unchecked state as compliant.
+    if report.is_compliant is None:
+        raise BadRequestError(
+            detail=(
+                "Report was not checked (no legal guidelines configured). "
+                "Run a compliance check with guidelines before approving."
+            )
+        )
 
     if report.is_compliant and not report.violations:
         raise BadRequestError(

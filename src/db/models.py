@@ -330,7 +330,9 @@ class ComplianceReport(Base):
         ForeignKey("campaigns.id", ondelete="CASCADE"),
         nullable=False,
     )
-    is_compliant: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # Nullable: ``None`` represents a "not checked" report (e.g. a campaign
+    # with no legal guidelines configured). ``True``/``False`` are real verdicts.
+    is_compliant: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     violations: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default="[]"
     )
