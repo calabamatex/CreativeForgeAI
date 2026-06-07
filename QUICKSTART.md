@@ -43,7 +43,7 @@ cp .env.example .env
 # Edit .env and add your API keys:
 # - FIREFLY_API_KEY
 # - FIREFLY_CLIENT_ID
-# - CLAUDE_API_KEY
+# - ANTHROPIC_API_KEY
 ```
 
 You need Claude (for localization) plus at least ONE image backend

@@ -27,7 +27,9 @@ class Config:
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
         
         # Anthropic Claude API Key (for text processing)
-        self.CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+        # Canonical name is ANTHROPIC_API_KEY (Anthropic SDK convention);
+        # CLAUDE_API_KEY is accepted as a fallback for backwards compatibility.
+        self.CLAUDE_API_KEY = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
         
         # Default Image Generation Backend
         self.DEFAULT_IMAGE_BACKEND = os.getenv("DEFAULT_IMAGE_BACKEND", "firefly").lower()
@@ -87,7 +89,7 @@ class Config:
         # Check Claude for text processing (optional but recommended)
         if self.ENABLE_CLAUDE_INTEGRATION and not self.CLAUDE_API_KEY:
             warnings.append(
-                "CLAUDE_API_KEY not set - guideline extraction and localization "
+                "ANTHROPIC_API_KEY not set - guideline extraction and localization "
                 "will use fallback methods"
             )
         

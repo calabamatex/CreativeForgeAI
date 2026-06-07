@@ -61,7 +61,7 @@ def _build_backend_list() -> list[BackendInfo]:
         ),
         BackendInfo(
             name="claude",
-            available=bool(os.getenv("CLAUDE_API_KEY")),
+            available=bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")),
             description="Anthropic Claude (text processing only)",
         ),
     ]
