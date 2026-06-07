@@ -43,9 +43,11 @@ class LocalStorageBackend(StorageBackend):
     def _resolve_path(self, key: str) -> Path:
         """Turn a storage key into an absolute filesystem path."""
         validate_storage_key(key)
-        resolved = (self._base_dir / key).resolve()
-        # Guard against path traversal
-        if not str(resolved).startswith(str(self._base_dir)):
+        base = self._base_dir.resolve()
+        resolved = (base / key).resolve()
+        # Real containment check (not string-prefix): rejects sibling-prefix
+        # bypasses such as base ``/data/output`` vs ``/data/output-evil``.
+        if resolved != base and not resolved.is_relative_to(base):
             raise StorageError(
                 f"Resolved path escapes base directory: {key}"
             )
