@@ -220,3 +220,63 @@ startup fails first.)
 
 **Infra:** Docker daemon UP; `docker compose config` FAILS (`CMD-EXEC` typo in postgres
 healthcheck); no `.env`.
+
+---
+
+## Dev environment (P0-T5)
+
+The local Docker Compose stack (Postgres + Redis + MinIO) was brought up healthy
+and verified reachable from the app. Changes made to get here:
+
+- Fixed the invalid postgres healthcheck `CMD-EXEC` → `CMD-SHELL` so
+  `docker compose config` passes (`docker-compose.yml:23`). Redis/MinIO
+  healthchecks were already valid.
+- Host ports remapped to avoid a collision with another local stack already
+  bound to :5432/:6379/:9000-9001 (the `affiliatemarketingplatform` project —
+  see `docs/FOUND_ISSUES.md`): **postgres 5432→5434, redis 6379→6380,
+  minio 9000→9002 / 9001→9003**. Containers still listen on their default
+  ports internally.
+- Added a one-shot `minio-init` service that creates the `genai-assets` bucket.
+- Reconciled the hardcoded `DATABASE_URL` default in `src/db/base.py` and the
+  `.env.example` infra creds to the real Compose values (remapped ports).
+
+### `docker compose ps`
+
+```
+NAME             IMAGE                COMMAND                  SERVICE    STATUS                    PORTS
+genai-minio      minio/minio:latest   "/usr/bin/docker-ent…"   minio      Up (healthy)   0.0.0.0:9002->9000/tcp, 0.0.0.0:9003->9001/tcp
+genai-postgres   postgres:16          "docker-entrypoint.s…"   postgres   Up (healthy)   0.0.0.0:5434->5432/tcp
+genai-redis      redis:7-alpine       "docker-entrypoint.s…"   redis      Up (healthy)   0.0.0.0:6380->6379/tcp
+```
+
+(`genai-minio-init` runs once to create the bucket, then exits 0.)
+
+### Connectivity checks (with the documented `.env` loaded)
+
+**Postgres** — `alembic upgrade head`:
+
+```
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 53a16420a6ea, baseline schema
+exit=0
+```
+
+**Redis** — `r.from_url(REDIS_URL).ping()`:
+
+```
+redis ok
+```
+
+**MinIO / S3** — repo storage backend (`STORAGE_BACKEND=s3`,
+`get_default_storage_backend()`), save + list round-trip against bucket
+`genai-assets`:
+
+```
+storage.s3.init  bucket=genai-assets endpoint_url=http://localhost:9002 region=us-east-1
+storage.s3.saved bucket=genai-assets key=campaigns/_p0t5_healthcheck.txt size=2
+list_keys(campaigns/) -> ['campaigns/_p0t5_healthcheck.txt']
+minio/s3 ok
+```
+
+The stack is left **UP** as the dev environment for later phases.

@@ -16,9 +16,14 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
+# Default targets the local Docker Compose Postgres service (see
+# docker-compose.yml). Its host port is remapped 5432 -> 5434 to avoid a
+# collision with another local stack on :5432 (see docs/FOUND_ISSUES.md), so
+# the default uses 5434 / the Compose-provisioned db, user and password. These
+# are non-secret local-dev credentials; production MUST set DATABASE_URL.
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/adobe_genai",
+    "postgresql+asyncpg://genai:genai_dev@localhost:5434/genai_platform",
 )
 
 
