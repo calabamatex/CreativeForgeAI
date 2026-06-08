@@ -1,6 +1,7 @@
 """
 Integration tests for the main pipeline orchestrator.
 """
+import asyncio
 import pytest
 from unittest.mock import patch, AsyncMock
 import json
@@ -256,6 +257,84 @@ class TestCreativeAutomationPipeline:
                 # Should have errors but still return output
                 assert output is not None
                 assert len(output.errors) > 0 or output.success_rate < 1.0
+
+
+class TestPipelineSemaphore:
+    """Tests for the lazily-bound concurrency semaphore (P2-T3)."""
+
+    def test_semaphore_not_created_at_construction(self, mock_env_vars):
+        """The semaphore must NOT be created in __init__.
+
+        Construction may happen outside/before the event loop that later runs
+        the campaign (e.g. under ARQ workers), so the semaphore must be created
+        lazily on first async use, not eagerly at construction time.
+        """
+        from src.pipeline import CreativeAutomationPipeline
+
+        pipeline = CreativeAutomationPipeline()
+
+        assert pipeline._api_semaphore is None
+        assert pipeline._max_concurrent_requests >= 1
+
+    def test_semaphore_lazy_binding(
+        self,
+        mock_env_vars,
+        example_brief,
+        mock_image_bytes,
+        tmp_path,
+    ):
+        """Construct outside any loop, then run on a fresh loop.
+
+        This exercises the loop-binding bug: a semaphore created at construction
+        time binds to whatever loop is current then. Here the pipeline is built
+        in a context with NO running loop, and ``process_campaign`` is awaited
+        inside a *separate* ``asyncio.run`` event loop. With eager construction
+        this can raise ``RuntimeError: ... bound to a different event loop`` /
+        "got Future attached to a different loop". With lazy creation the
+        semaphore binds to the running loop and no such error occurs.
+        """
+        from src.pipeline import CreativeAutomationPipeline
+        from src.models import CampaignBrief
+
+        # Fake image backend so no paid API calls are made.
+        fake_image_service = AsyncMock()
+        fake_image_service.generate_image = AsyncMock(return_value=mock_image_bytes)
+        fake_image_service.get_backend_name = lambda: "fake"
+
+        brief = CampaignBrief(**example_brief)
+
+        with patch(
+            "src.genai.factory.ImageGenerationFactory.create",
+            return_value=fake_image_service,
+        ), patch("src.storage.StorageManager") as mock_storage:
+            mock_storage.return_value.create_campaign_directory = lambda x: None
+            mock_storage.return_value.save_image = lambda x, y: None
+            mock_storage.return_value.get_asset_path = lambda *args: tmp_path / "asset.png"
+            mock_storage.return_value.save_report = lambda x, y: tmp_path / "report.json"
+
+            # Construct the pipeline with NO running event loop. If __init__
+            # eagerly created the semaphore, it would (try to) bind here.
+            with pytest.raises(RuntimeError):
+                asyncio.get_running_loop()
+            pipeline = CreativeAutomationPipeline(image_backend="firefly")
+
+            # Semaphore must not exist yet (lazy creation).
+            assert pipeline._api_semaphore is None
+
+            # Avoid any real Claude localization call for the es-MX locale; this
+            # also exercises the second semaphore use site.
+            pipeline.claude_service.localize_message = AsyncMock(
+                return_value=brief.campaign_message
+            )
+
+            # Await on a brand-new event loop, distinct from construction.
+            output = asyncio.run(pipeline.process_campaign(brief))
+
+            # No loop-binding error was raised, and the semaphore was created
+            # lazily, bound to the asyncio.run loop.
+            assert output is not None
+            assert output.campaign_id == "TEST-CAMPAIGN-001"
+            assert isinstance(pipeline._api_semaphore, asyncio.Semaphore)
 
 
 class TestPipelineIntegration:

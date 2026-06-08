@@ -66,7 +66,24 @@ class CreativeAutomationPipeline:
         self.legal_parser = LegalComplianceParser(self.claude_service)
         self.image_processor = ImageProcessor()
         self.storage = StorageManager()
-        self._api_semaphore = asyncio.Semaphore(config.MAX_CONCURRENT_REQUESTS)
+        # Create the concurrency semaphore lazily (see ``_get_semaphore``) so it
+        # binds to the running event loop rather than whatever loop happens to
+        # be current at construction time. Under ARQ workers the pipeline may be
+        # constructed outside the loop that later runs ``process_campaign``.
+        self._max_concurrent_requests = config.MAX_CONCURRENT_REQUESTS
+        self._api_semaphore: Optional[asyncio.Semaphore] = None
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """Return the API concurrency semaphore, creating it lazily.
+
+        Called from within async methods (a running loop is guaranteed), so the
+        ``asyncio.Semaphore`` binds to the correct loop. ``process_campaign`` is
+        the single entry point and the first call happens before any concurrent
+        await, so a plain lazy init is race-free here.
+        """
+        if self._api_semaphore is None:
+            self._api_semaphore = asyncio.Semaphore(self._max_concurrent_requests)
+        return self._api_semaphore
 
     # ------------------------------------------------------------------
     # Extracted helpers
@@ -198,7 +215,7 @@ class CreativeAutomationPipeline:
         )
 
         api_start = time.time()
-        async with self._api_semaphore:
+        async with self._get_semaphore():
             hero_bytes = await self.image_service.generate_image(
                 prompt, size="2048x2048", brand_guidelines=brand_guidelines
             )
@@ -330,7 +347,7 @@ class CreativeAutomationPipeline:
 
                     if locale != brief.campaign_message.locale and localization_guidelines:
                         loc_start = time.time()
-                        async with self._api_semaphore:
+                        async with self._get_semaphore():
                             localized_message = await self.claude_service.localize_message(
                                 brief.campaign_message, locale, localization_guidelines
                             )
