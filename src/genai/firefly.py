@@ -12,7 +12,25 @@ logger = structlog.get_logger(__name__)
 
 class FireflyImageService(ImageGenerationService):
     """Service for generating images using Adobe Firefly API."""
-    
+
+    # Firefly's generate endpoint accepts an explicit {width, height}. These are
+    # the native dimensions we request per ratio on the opt-in native path.
+    #
+    # FALLBACK: 4:5 maps to 1024x1280 (an exact 4:5 frame), so no crop fallback
+    # is needed for Firefly. Firefly supports a broad set of sizes; these stay
+    # within commonly-supported bounds. Used only on the opt-in native path; the
+    # default path generates a 2048x2048 hero and crops locally (see base.py).
+    #
+    # NOTE (P2-T1): authentication (headers/tokens) is unchanged here — only this
+    # size map was added. Live Firefly auth is delivered separately in P2-T1.
+    RATIO_SIZE_MAP = {
+        "1:1": "2048x2048",
+        "9:16": "1152x2048",   # portrait
+        "16:9": "2048x1152",   # landscape
+        "4:5": "1024x1280",    # exact 4:5
+    }
+    DEFAULT_SQUARE_SIZE = "2048x2048"
+
     def __init__(
         self,
         api_key: Optional[str] = None,

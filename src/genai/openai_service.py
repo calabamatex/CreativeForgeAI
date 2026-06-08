@@ -12,7 +12,22 @@ logger = structlog.get_logger(__name__)
 
 class OpenAIImageService(ImageGenerationService):
     """Service for generating images using OpenAI DALL-E 3."""
-    
+
+    # DALL-E 3 supports exactly three sizes: 1024x1024, 1024x1792 (portrait),
+    # 1792x1024 (landscape). Map the four supported campaign ratios onto those.
+    #
+    # FALLBACK: 4:5 (a 0.8 portrait) has no exact DALL-E size; we use the nearest
+    # supported PORTRAIT size 1024x1792 and rely on the pipeline / image_processor
+    # to crop to the precise 4:5 frame. Used only on the opt-in native path; the
+    # default path generates a square hero and crops locally (see base.py).
+    RATIO_SIZE_MAP = {
+        "1:1": "1024x1024",
+        "9:16": "1024x1792",   # portrait
+        "16:9": "1792x1024",   # landscape
+        "4:5": "1024x1792",    # nearest supported portrait (fallback, then crop)
+    }
+    DEFAULT_SQUARE_SIZE = "1024x1024"
+
     def __init__(self, api_key: Optional[str] = None, max_retries: int = 3):
         config = get_config()
         super().__init__(
@@ -94,6 +109,8 @@ class OpenAIImageService(ImageGenerationService):
         size_map = {
             "1024x1024": "1024x1024",
             "2048x2048": "1024x1024",  # Downscale to supported
+            "1024x1792": "1024x1792",  # Portrait (native opt-in path)
+            "1792x1024": "1792x1024",  # Landscape (native opt-in path)
             "1080x1920": "1024x1792",  # Portrait
             "1920x1080": "1792x1024",  # Landscape
             "1024x768": "1024x1024",   # Square

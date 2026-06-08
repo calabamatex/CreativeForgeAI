@@ -214,10 +214,16 @@ class CreativeAutomationPipeline:
             or f"professional product photo of {product.product_name}, {product.product_description}"
         )
 
+        # Square hero size for the DEFAULT hero-plus-crop path. Backends expose
+        # their own preferred square via ``DEFAULT_SQUARE_SIZE`` (Firefly/2048,
+        # DALL-E & Gemini/1024); falls back to 2048x2048 to preserve prior
+        # behaviour for any backend that doesn't define it.
+        square_size = getattr(self.image_service, "DEFAULT_SQUARE_SIZE", "2048x2048")
+
         api_start = time.time()
         async with self._get_semaphore():
             hero_bytes = await self.image_service.generate_image(
-                prompt, size="2048x2048", brand_guidelines=brand_guidelines
+                prompt, size=square_size, brand_guidelines=brand_guidelines
             )
         api_ms = (time.time() - api_start) * 1000
         metrics.api_response_times.append(api_ms)
@@ -277,6 +283,46 @@ class CreativeAutomationPipeline:
 
         return asset_path, proc_ms
 
+    async def _generate_native_for_ratio(
+        self,
+        product: Product,
+        localized_message: CampaignMessage,
+        ratio: str,
+        brief: CampaignBrief,
+        brand_guidelines: Optional[ComprehensiveBrandGuidelines],
+        metrics: _MetricsState,
+    ) -> Tuple[Path, float]:
+        """OPT-IN native path: generate a fresh image for ``ratio`` natively.
+
+        Issues ONE image-gen API call per ratio using the backend's
+        ``ratio_to_size(ratio)`` mapping, then resizes to the exact ratio frame
+        (covers documented nearest-ratio fallbacks, e.g. DALL-E 4:5) and applies
+        the same overlays/post-processing as the crop path.
+
+        COST GUARD: this is N-times more paid calls than the default hero-plus-
+        crop path, hence it only runs when ``brief.native_aspect_ratios`` is set.
+        """
+        native_size = self.image_service.ratio_to_size(ratio)
+        prompt = (
+            product.generation_prompt
+            or f"professional product photo of {product.product_name}, {product.product_description}"
+        )
+
+        logger.info("pipeline.generating_native_ratio", ratio=ratio, size=native_size)
+        api_start = time.time()
+        async with self._get_semaphore():
+            ratio_bytes = await self.image_service.generate_image(
+                prompt, size=native_size, brand_guidelines=brand_guidelines
+            )
+        metrics.api_response_times.append((time.time() - api_start) * 1000)
+        metrics.total_api_calls += 1
+
+        # Reuse the crop+overlay pipeline; resize_to_aspect_ratio also enforces
+        # the exact frame for backends whose nearest native size differs (4:5).
+        return self._generate_asset_for_ratio(
+            ratio_bytes, localized_message, product, ratio, brief, brand_guidelines
+        )
+
     # ------------------------------------------------------------------
     # Main orchestrator
     # ------------------------------------------------------------------
@@ -332,14 +378,23 @@ class CreativeAutomationPipeline:
         for product in brief.products:
             logger.info("pipeline.processing_product", product_name=product.product_name, product_id=product.product_id)
             try:
-                # Get hero image
-                hero_bytes, hero_path, was_cached = await self._get_hero_image(
-                    product, brand_guidelines, backend_name, metrics
+                # Hero image. The DEFAULT path always needs a square hero to crop
+                # from. On the OPT-IN native path we only need the hero if the
+                # product supplies an existing one (used for reporting/reuse);
+                # otherwise we skip the extra square API call entirely, since each
+                # ratio is generated natively below.
+                hero_bytes: bytes = b""
+                hero_path: Optional[str] = None
+                has_existing_hero = bool(
+                    product.existing_assets and "hero" in product.existing_assets
                 )
-
-                # Save hero if newly generated
-                if not was_cached:
-                    hero_path = self._save_hero_image(hero_bytes, product.product_id, brief.campaign_id)
+                if not brief.native_aspect_ratios or has_existing_hero:
+                    hero_bytes, hero_path, was_cached = await self._get_hero_image(
+                        product, brand_guidelines, backend_name, metrics
+                    )
+                    # Save hero if newly generated
+                    if not was_cached:
+                        hero_path = self._save_hero_image(hero_bytes, product.product_id, brief.campaign_id)
 
                 # Process locales
                 for locale in brief.target_locales:
@@ -366,15 +421,27 @@ class CreativeAutomationPipeline:
                                 asset_path = Path(existing_path)
                             else:
                                 logger.warning("pipeline.existing_asset_missing", ratio=ratio)
-                                asset_path, proc_ms = self._generate_asset_for_ratio(
-                                    hero_bytes, localized_message, product, ratio, brief, brand_guidelines
-                                )
+                                if brief.native_aspect_ratios:
+                                    asset_path, proc_ms = await self._generate_native_for_ratio(
+                                        product, localized_message, ratio, brief, brand_guidelines, metrics
+                                    )
+                                else:
+                                    asset_path, proc_ms = self._generate_asset_for_ratio(
+                                        hero_bytes, localized_message, product, ratio, brief, brand_guidelines
+                                    )
                                 metrics.image_processing_total_ms += proc_ms
                         else:
                             logger.info("pipeline.generating_variation", ratio=ratio)
-                            asset_path, proc_ms = self._generate_asset_for_ratio(
-                                hero_bytes, localized_message, product, ratio, brief, brand_guidelines
-                            )
+                            if brief.native_aspect_ratios:
+                                # OPT-IN: one paid API call per ratio (native size).
+                                asset_path, proc_ms = await self._generate_native_for_ratio(
+                                    product, localized_message, ratio, brief, brand_guidelines, metrics
+                                )
+                            else:
+                                # DEFAULT: reuse the square hero, crop locally (no API call).
+                                asset_path, proc_ms = self._generate_asset_for_ratio(
+                                    hero_bytes, localized_message, product, ratio, brief, brand_guidelines
+                                )
                             metrics.image_processing_total_ms += proc_ms
 
                         generated_assets.append(GeneratedAsset(

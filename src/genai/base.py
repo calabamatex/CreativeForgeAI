@@ -12,6 +12,28 @@ logger = structlog.get_logger(__name__)
 class ImageGenerationService(ABC):
     """Abstract base class for all image generation backends."""
 
+    # Default ratio -> size map (generic square-biased fallback).
+    #
+    # NOTE: native per-ratio generation is OPT-IN (CampaignBrief.native_aspect_ratios).
+    # The DEFAULT pipeline path generates ONE square hero and center-crops it to each
+    # ratio locally (no per-ratio API call). When the opt-in flag is set, the pipeline
+    # asks each backend to generate the ratio natively using ``ratio_to_size(ratio)``.
+    #
+    # COST GUARD: native generation issues one PAID API call PER ratio (NxM more calls
+    # than the hero-plus-crop default), which is exactly why it is opt-in. See
+    # docs/ARCHITECTURE.md.
+    #
+    # Subclasses override this with their backend's real supported sizes/aspect args.
+    RATIO_SIZE_MAP: dict[str, str] = {
+        "1:1": "1024x1024",
+        "9:16": "1024x1024",
+        "16:9": "1024x1024",
+        "4:5": "1024x1024",
+    }
+
+    # Size requested for the default square hero (hero-plus-crop path).
+    DEFAULT_SQUARE_SIZE: str = "1024x1024"
+
     def __init__(self, api_key: str, max_retries: int = 3):
         self.api_key = api_key
         self.max_retries = max_retries
@@ -95,6 +117,16 @@ class ImageGenerationService(ABC):
 
         return self._sanitize_prompt(enhanced)
     
+    def ratio_to_size(self, ratio: str) -> str:
+        """Map a supported aspect ratio (e.g. ``"9:16"``) to this backend's
+        real size/aspect argument for native per-ratio generation.
+
+        Used ONLY on the opt-in native path. Unsupported ratios fall back to the
+        nearest supported size (``"1:1"`` square as a last resort); subclasses
+        document their specific fallbacks inline in ``RATIO_SIZE_MAP``.
+        """
+        return self.RATIO_SIZE_MAP.get(ratio, self.RATIO_SIZE_MAP.get("1:1", "1024x1024"))
+
     @abstractmethod
     def get_backend_name(self) -> str:
         """Return the backend name for logging/reporting."""

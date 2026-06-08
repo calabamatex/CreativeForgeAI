@@ -44,6 +44,16 @@ class CampaignBrief(BaseModel):
         default=False,
         description="Enable multi-locale generation"
     )
+    native_aspect_ratios: bool = Field(
+        default=False,
+        description=(
+            "OPT-IN: generate each aspect ratio natively via one image-gen API "
+            "call per ratio (using the backend's per-ratio size map). Default "
+            "False keeps the cheaper hero-plus-crop behaviour: one square hero "
+            "is generated and center-cropped to every ratio locally. "
+            "COST GUARD: enabling this multiplies paid image-gen calls per ratio."
+        ),
+    )
     target_locales: List[str] = Field(
         default_factory=lambda: ["en-US"],
         description="Target locales for campaign"

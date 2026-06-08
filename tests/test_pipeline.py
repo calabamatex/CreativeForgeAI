@@ -337,6 +337,101 @@ class TestPipelineSemaphore:
             assert isinstance(pipeline._api_semaphore, asyncio.Semaphore)
 
 
+class TestPipelineAspectRatioGeneration:
+    """P2-T2: native (opt-in) vs hero-plus-crop (default) ratio generation.
+
+    Fully mocked backend — no network, no paid image generation.
+    """
+
+    def _make_fake_backend(self, mock_image_bytes):
+        """A fake image service that records generate_image size kwargs and
+        carries a real ratio->size map (mirrors OpenAI/DALL-E)."""
+        fake = AsyncMock()
+        fake.generate_image = AsyncMock(return_value=mock_image_bytes)
+        fake.get_backend_name = lambda: "fake-dalle"
+        fake.DEFAULT_SQUARE_SIZE = "1024x1024"
+        ratio_map = {
+            "1:1": "1024x1024",
+            "9:16": "1024x1792",
+            "16:9": "1792x1024",
+            "4:5": "1024x1792",
+        }
+        fake.ratio_to_size = lambda r: ratio_map.get(r, "1024x1024")
+        return fake
+
+    def _patched_storage(self, mock_storage, tmp_path):
+        mock_storage.return_value.create_campaign_directory = lambda x: None
+        mock_storage.return_value.save_image = lambda x, y: None
+        mock_storage.return_value.get_asset_path = lambda *args: tmp_path / "asset.png"
+        mock_storage.return_value.save_report = lambda x, y: tmp_path / "report.json"
+
+    @pytest.mark.asyncio
+    async def test_native_mode_calls_per_ratio_size(
+        self, example_brief, mock_image_bytes, tmp_path
+    ):
+        """native_aspect_ratios=True -> one generate_image call PER ratio, each
+        with that ratio's mapped native size kwarg."""
+        from src.pipeline import CreativeAutomationPipeline
+        from src.models import CampaignBrief
+
+        brief_data = example_brief.copy()
+        brief_data["native_aspect_ratios"] = True
+        brief_data["aspect_ratios"] = ["1:1", "9:16", "16:9", "4:5"]
+        brief_data["target_locales"] = ["en-US"]
+        brief_data["enable_localization"] = False
+
+        fake = self._make_fake_backend(mock_image_bytes)
+
+        with patch(
+            "src.genai.factory.ImageGenerationFactory.create", return_value=fake
+        ), patch("src.storage.StorageManager") as mock_storage:
+            self._patched_storage(mock_storage, tmp_path)
+
+            pipeline = CreativeAutomationPipeline(image_backend="firefly")
+            brief = CampaignBrief(**brief_data)
+            output = await pipeline.process_campaign(brief)
+
+        assert output is not None
+        # Capture the size kwarg from every generate_image call.
+        sizes = [c.kwargs.get("size") for c in fake.generate_image.call_args_list]
+        # One call per ratio (no extra square hero call in native mode).
+        assert len(sizes) == 4
+        assert sizes == ["1024x1024", "1024x1792", "1792x1024", "1024x1792"]
+
+    @pytest.mark.asyncio
+    async def test_default_mode_single_square_then_crop(
+        self, example_brief, mock_image_bytes, tmp_path
+    ):
+        """Default (native off) -> exactly ONE square generate_image call; the
+        ratios are produced by local cropping, not extra API calls."""
+        from src.pipeline import CreativeAutomationPipeline
+        from src.models import CampaignBrief
+
+        brief_data = example_brief.copy()
+        brief_data.pop("native_aspect_ratios", None)  # default is False
+        brief_data["aspect_ratios"] = ["1:1", "9:16", "16:9", "4:5"]
+        brief_data["target_locales"] = ["en-US"]
+        brief_data["enable_localization"] = False
+
+        fake = self._make_fake_backend(mock_image_bytes)
+
+        with patch(
+            "src.genai.factory.ImageGenerationFactory.create", return_value=fake
+        ), patch("src.storage.StorageManager") as mock_storage:
+            self._patched_storage(mock_storage, tmp_path)
+
+            pipeline = CreativeAutomationPipeline(image_backend="firefly")
+            brief = CampaignBrief(**brief_data)
+            output = await pipeline.process_campaign(brief)
+
+        assert output is not None
+        assert brief.native_aspect_ratios is False
+        # Exactly one generation call (the square hero), regardless of #ratios.
+        assert fake.generate_image.call_count == 1
+        sizes = [c.kwargs.get("size") for c in fake.generate_image.call_args_list]
+        assert sizes == ["1024x1024"]  # backend's DEFAULT_SQUARE_SIZE
+
+
 class TestPipelineIntegration:
     """End-to-end integration tests."""
 

@@ -18,7 +18,7 @@ GenAI Creative Automation Platform is an enterprise-grade system that automates 
 - 🌍 **AI-Powered Localization** - Claude 3.5 Sonnet for culturally-adapted messaging
 - ⚖️ **Legal Compliance Checking** - Pre-generation validation (FTC, FDA, SEC, FINRA)
 - 🎭 **Brand Guidelines Enforcement** - Automated brand consistency across all assets
-- 📐 **Multi-Format Asset Output** - 1:1, 16:9, 9:16 aspect ratios (currently one square hero generated, then cropped to each ratio; native per-ratio generation is *in progress*)
+- 📐 **Multi-Format Asset Output** - 1:1, 16:9, 9:16, 4:5 aspect ratios. The default generates one square hero, then center-crops to each ratio. Native per-ratio generation (one API call per ratio) is available as an opt-in flag (`native_aspect_ratios`); end-to-end native output remains *in progress* pending live-backend verification.
 - 🔄 **Asset Reuse System** - Intelligent caching to reduce API costs
 - 🎨 **Advanced Text Customization** - Colors, shadows, backgrounds with brand control
 - 🖼️ **Logo Placement** - Automated logo overlay with 4-corner positioning
@@ -72,7 +72,7 @@ GenAI Creative Automation Platform is an enterprise-grade system that automates 
 - ✅ **Design system compliance** - Consistent brand experience
 
 ### Asset Management
-- 🔶 **Multi-format output** *(in progress)* - Square (1:1), Landscape (16:9), Portrait (9:16). Today a single square hero is generated and cropped to the other ratios; native per-ratio generation is being delivered in a later phase.
+- 🔶 **Multi-format output** *(in progress)* - Square (1:1), Landscape (16:9), Portrait (9:16), Portrait (4:5). By default a single square hero is generated and center-cropped to the other ratios. Native per-ratio generation is wired as an opt-in (`native_aspect_ratios` on the brief), with per-backend ratio→size maps; it stays *in progress* until verified against a live backend (cost guard: native issues one paid call per ratio). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - ✅ **Multiple output formats** - PNG, JPEG, WebP
 - ✅ **Asset reuse** - Intelligent caching system
 - ✅ **Organized storage** - Campaign/Locale/Product/Format hierarchy
@@ -597,7 +597,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### In Progress (delivered later in the correctness/feature plan)
 
-- 🔶 **Native multi-format generation** - Generate each aspect ratio natively. Today a single square hero is generated and cropped to 1:1 / 16:9 / 9:16.
+- 🔶 **Native multi-format generation** - Opt-in via `native_aspect_ratios`: the pipeline requests each ratio (1:1 / 9:16 / 16:9 / 4:5) natively using per-backend ratio→size maps (one paid call per ratio). The default remains a single square hero cropped to each ratio. Marked in progress until native output is verified against a live backend (post-Firefly-auth, P2-T1).
 - 🔶 **Real cost & API-call metrics** - The API metrics endpoints currently return placeholder zeros for `api_calls`, `cache_hit_rate`, and `cost_estimate_usd`; real instrumentation is being wired in.
 - 🔶 **Live WebSocket progress** - Real-time job progress over WebSocket. The current implementation emits a fixed heartbeat, not true per-step progress.
 

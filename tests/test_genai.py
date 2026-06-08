@@ -437,6 +437,84 @@ class TestClaudeTextService:
         assert service is not None
 
 
+class TestBackendAspectRatioMaps:
+    """P2-T2: per-backend ratio -> native size maps (mocked, no API calls)."""
+
+    SUPPORTED = ["1:1", "9:16", "16:9", "4:5"]
+
+    def test_openai_aspect_ratio_map(self):
+        """DALL-E 3 maps the four ratios to its three supported sizes."""
+        from src.genai.openai_service import OpenAIImageService
+
+        svc = OpenAIImageService(api_key="test")
+        assert svc.ratio_to_size("1:1") == "1024x1024"
+        assert svc.ratio_to_size("9:16") == "1024x1792"
+        assert svc.ratio_to_size("16:9") == "1792x1024"
+        # 4:5 has no native DALL-E size -> nearest portrait fallback.
+        assert svc.ratio_to_size("4:5") == "1024x1792"
+        # Every native size is a real DALL-E-supported size.
+        for ratio in self.SUPPORTED:
+            assert svc.ratio_to_size(ratio) in {"1024x1024", "1024x1792", "1792x1024"}
+
+    def test_openai_aspect_ratio_unsupported_fallback(self):
+        """Unknown ratio falls back to square."""
+        from src.genai.openai_service import OpenAIImageService
+
+        svc = OpenAIImageService(api_key="test")
+        assert svc.ratio_to_size("21:9") == "1024x1024"
+
+    def test_gemini_aspect_ratio_map(self):
+        """Gemini ratio->size map + aspectRatio string reflects the request."""
+        from src.genai.gemini_service import GeminiImageService
+
+        svc = GeminiImageService(api_key="test")
+        assert svc.ratio_to_size("1:1") == "1024x1024"
+        assert svc.ratio_to_size("9:16") == "1080x1920"
+        assert svc.ratio_to_size("16:9") == "1920x1080"
+        assert svc.ratio_to_size("4:5") == "1024x1280"
+
+        # _get_aspect_ratio must now reflect the requested ratio, not always 1:1.
+        assert svc._get_aspect_ratio(1024, 1024) == "1:1"
+        assert svc._get_aspect_ratio(1920, 1080) == "16:9"
+        assert svc._get_aspect_ratio(1080, 1920) == "9:16"
+        # 4:5 has no native Imagen ratio -> nearest 3:4 fallback.
+        assert svc._get_aspect_ratio(1024, 1280) == "3:4"
+
+    def test_gemini_aspect_ratio_unsupported_fallback(self):
+        """Unknown ratio falls back to square."""
+        from src.genai.gemini_service import GeminiImageService
+
+        svc = GeminiImageService(api_key="test")
+        assert svc.ratio_to_size("21:9") == "1024x1024"
+
+    def test_firefly_aspect_ratio_map(self):
+        """Firefly native sizes per ratio (size map only, auth untouched)."""
+        from src.genai.firefly import FireflyImageService
+
+        svc = FireflyImageService(api_key="test", client_id="test")
+        assert svc.ratio_to_size("1:1") == "2048x2048"
+        assert svc.ratio_to_size("9:16") == "1152x2048"
+        assert svc.ratio_to_size("16:9") == "2048x1152"
+        assert svc.ratio_to_size("4:5") == "1024x1280"
+
+    def test_firefly_aspect_ratio_unsupported_fallback(self):
+        """Unknown ratio falls back to the square size."""
+        from src.genai.firefly import FireflyImageService
+
+        svc = FireflyImageService(api_key="test", client_id="test")
+        assert svc.ratio_to_size("21:9") == "2048x2048"
+
+    def test_default_square_sizes(self):
+        """Each backend exposes its preferred square hero size."""
+        from src.genai.openai_service import OpenAIImageService
+        from src.genai.gemini_service import GeminiImageService
+        from src.genai.firefly import FireflyImageService
+
+        assert OpenAIImageService(api_key="t").DEFAULT_SQUARE_SIZE == "1024x1024"
+        assert GeminiImageService(api_key="t").DEFAULT_SQUARE_SIZE == "1024x1024"
+        assert FireflyImageService(api_key="t", client_id="t").DEFAULT_SQUARE_SIZE == "2048x2048"
+
+
 class TestMultiBackendIntegration:
     """Integration tests for multi-backend functionality."""
 

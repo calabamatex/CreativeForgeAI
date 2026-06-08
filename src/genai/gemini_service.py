@@ -15,6 +15,22 @@ logger = structlog.get_logger(__name__)
 class GeminiImageService(ImageGenerationService):
     """Service for generating images using Google Gemini Imagen 4."""
 
+    # Imagen 4 takes an ``aspectRatio`` string; supported values are
+    # 1:1, 3:4, 4:3, 9:16, 16:9. We still pass a WxH ``size`` through the
+    # pipeline and derive the aspectRatio from it in ``_get_aspect_ratio``.
+    #
+    # FALLBACK: 4:5 (0.8) is NOT a native Imagen aspect ratio; the nearest
+    # supported portrait is 3:4 (0.75). We request a 1024x1280 size whose ratio
+    # rounds to 4:5 here but maps to Imagen's 3:4, then crop to exact 4:5.
+    # Used only on the opt-in native path (see base.py / docs/ARCHITECTURE.md).
+    RATIO_SIZE_MAP = {
+        "1:1": "1024x1024",
+        "9:16": "1080x1920",   # -> aspectRatio 9:16
+        "16:9": "1920x1080",   # -> aspectRatio 16:9
+        "4:5": "1024x1280",    # nearest native is 3:4 (fallback), then crop
+    }
+    DEFAULT_SQUARE_SIZE = "1024x1024"
+
     def __init__(self, api_key: Optional[str] = None, max_retries: int = 3):
         config = get_config()
         super().__init__(
@@ -108,18 +124,29 @@ class GeminiImageService(ImageGenerationService):
         raise Exception("Max retries exceeded for Gemini API")
     
     def _get_aspect_ratio(self, width: int, height: int) -> str:
-        """Determine aspect ratio for Imagen."""
+        """Determine the Imagen ``aspectRatio`` string from a WxH size.
+
+        Imagen 4 natively supports: 1:1, 3:4, 4:3, 9:16, 16:9.
+        This now reflects the REQUESTED ratio (not always 1:1) so the opt-in
+        native path generates portrait/landscape frames correctly.
+
+        FALLBACK: a 4:5 (0.8) request has no native Imagen ratio; the nearest
+        supported portrait is 3:4 (0.75), so 4:5 sizes resolve to "3:4" and the
+        pipeline/image_processor crops to the exact 4:5 frame afterwards.
+        """
         ratio = width / height
-        
+
         if abs(ratio - 1.0) < 0.1:
             return "1:1"
-        elif abs(ratio - 16/9) < 0.1:
+        elif abs(ratio - 16 / 9) < 0.1:
             return "16:9"
-        elif abs(ratio - 9/16) < 0.1:
+        elif abs(ratio - 9 / 16) < 0.1:
             return "9:16"
-        elif abs(ratio - 4/3) < 0.1:
+        elif abs(ratio - 4 / 3) < 0.06:
             return "4:3"
-        elif abs(ratio - 3/4) < 0.1:
+        elif abs(ratio - 4 / 5) < 0.06:
+            return "3:4"  # 4:5 has no native ratio; nearest is 3:4, then crop
+        elif abs(ratio - 3 / 4) < 0.06:
             return "3:4"
         else:
             return "1:1"  # Default to square
