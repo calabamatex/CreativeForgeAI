@@ -354,3 +354,191 @@ async def authed_client(mock_db, admin_user) -> AsyncGenerator[tuple[AsyncClient
         yield ac, mock_db
 
     app.dependency_overrides.clear()
+
+
+# ===========================================================================
+# REAL integration harness (P3-T0a)
+# ===========================================================================
+#
+# Everything ABOVE this banner is the pre-existing, fully-mocked path that the
+# 8 ``test_api_*.py`` files rely on. It is left untouched. The fixtures below
+# are NEW (new names) and opt-in: they stand up a real Postgres test database,
+# a recording/controllable fake ARQ pool, and an in-memory storage backend so
+# the end-to-end tests can assert real inserts, the ``uq_asset_variant``
+# constraint, and enqueue side-effects.
+#
+# Schema is built with ``alembic upgrade head`` against a DEDICATED database
+# (``genai_platform_test``) on the Compose Postgres server — never the dev DB.
+# ---------------------------------------------------------------------------
+
+from sqlalchemy.ext.asyncio import (  # noqa: E402
+    async_sessionmaker,
+    create_async_engine,
+)
+
+from tests.integration.harness import (  # noqa: E402
+    FakeArqPool,
+    FakeStorageBackend,
+    ensure_test_database,
+    drop_test_database,
+    make_image_backend_mock,
+    run_alembic_upgrade_on,
+    tiny_png_bytes as _tiny_png_bytes,
+)
+
+
+@pytest.fixture(scope="session")
+def _test_db_url() -> str:
+    """Session-scoped: ensure the dedicated TEST database exists + is migrated.
+
+    Creates ``genai_platform_test`` if missing (on the Compose Postgres server,
+    with the dev creds — only the db *name* is swapped) and builds its schema
+    via ``alembic upgrade head``. Drops it again at the end of the test session
+    so the dev DB is never polluted and the test DB is re-creatable. Returns the
+    async DATABASE_URL for the test DB.
+
+    Synchronous fixture (uses ``asyncio.run`` for the asyncpg admin work) so it
+    is independent of any per-test event loop.
+    """
+    if "DATABASE_URL" not in os.environ:
+        pytest.skip("DATABASE_URL not set; real-DB harness unavailable")
+
+    import asyncio
+
+    test_url = asyncio.run(ensure_test_database())
+    run_alembic_upgrade_on(test_url)
+    try:
+        yield test_url
+    finally:
+        asyncio.run(drop_test_database())
+
+
+@pytest_asyncio.fixture
+async def real_db_engine(_test_db_url):
+    """Function-scoped async engine bound to the TEST database.
+
+    Created per test so it lives on the test's own event loop (pytest-asyncio
+    uses a function-scoped loop in auto mode); disposed at teardown. The DB
+    itself is created/migrated/dropped once per session by ``_test_db_url``.
+    """
+    engine = create_async_engine(_test_db_url, echo=False, pool_pre_ping=True)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def real_db_session(real_db_engine):
+    """Function-scoped real ``AsyncSession`` with PER-TEST ISOLATION.
+
+    Isolation mechanism: a single connection is opened and an OUTER
+    transaction begun; the session is bound to that connection and runs inside
+    a SAVEPOINT (nested transaction). Every ``session.commit()`` the app code
+    issues commits only to the savepoint — a new savepoint is started
+    automatically after each commit via the ``after_transaction_end`` event —
+    so writes are visible within the test but never reach the database. At
+    teardown the OUTER transaction is rolled back, discarding everything. A row
+    inserted in one test is therefore invisible in the next.
+    """
+    connection = await real_db_engine.connect()
+    trans = await connection.begin()
+
+    session_maker = async_sessionmaker(
+        bind=connection, expire_on_commit=False, join_transaction_mode="create_savepoint"
+    )
+    session = session_maker()
+
+    # ``join_transaction_mode="create_savepoint"`` makes the session run inside
+    # a SAVEPOINT on the externally-managed connection transaction and restart
+    # a fresh savepoint after each ``commit()``/``rollback()`` automatically, so
+    # the app's commits never escape the outer transaction.
+    try:
+        yield session
+    finally:
+        await session.close()
+        if trans.is_active:
+            await trans.rollback()
+        await connection.close()
+
+
+@pytest_asyncio.fixture
+async def real_app_client(real_db_session):
+    """Yield ``(client, real_db_session)`` wired to the REAL test DB.
+
+    Overrides ``get_db`` to yield the isolated ``real_db_session`` so API
+    routes execute against real Postgres. Rate limiting is disabled; auth is
+    NOT overridden (use the ``auth_header``/``admin_headers`` helpers, or layer
+    your own ``get_current_user`` override per-test).
+    """
+    from src.api.main import create_app
+
+    app = create_app()
+
+    async def _override_db():
+        yield real_db_session
+
+    async def _no_rate_limit():
+        pass
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[check_rate_limit] = _no_rate_limit
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac, real_db_session
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def fake_storage_backend() -> FakeStorageBackend:
+    """In-memory storage backend implementing ``StorageBackend``."""
+    return FakeStorageBackend()
+
+
+@pytest.fixture
+def tiny_png() -> bytes:
+    """A minimal valid 1x1 PNG (bytes)."""
+    return _tiny_png_bytes()
+
+
+@pytest.fixture
+def image_backend_mock():
+    """Mocked image-generation backend; ``generate_image`` returns a tiny PNG."""
+    return make_image_backend_mock()
+
+
+@pytest.fixture
+def fake_arq_pool(real_db_session, fake_storage_backend, image_backend_mock):
+    """Recording, controllable fake ARQ pool wired to the real harness.
+
+    ``enqueue_job`` records calls (dedupe by ``_job_id`` observable). ``drive``
+    runs the real ``process_campaign_job`` in-process against the real DB
+    session, the fake storage backend, and the mocked image backend.
+    """
+    return FakeArqPool(
+        session_factory=lambda: real_db_session,
+        storage_backend=fake_storage_backend,
+        image_backend=image_backend_mock,
+    )
+
+
+@pytest.fixture
+def patch_storage_factory(fake_storage_backend):
+    """Patch the storage factory so any code resolving the default backend
+    (``get_default_storage_backend`` / ``get_storage_backend``) gets the
+    in-memory fake. Yields the fake so the test can inspect what was written.
+    """
+    from unittest.mock import patch as _patch
+
+    import src.storage_factory as sf
+
+    sf.get_default_storage_backend.cache_clear()
+    with _patch.object(
+        sf, "get_storage_backend", return_value=fake_storage_backend
+    ), _patch.object(
+        sf, "get_default_storage_backend", return_value=fake_storage_backend
+    ):
+        yield fake_storage_backend
+    sf.get_default_storage_backend.cache_clear()
