@@ -58,3 +58,13 @@ The repos/worker write tz-aware datetimes (`datetime.now(timezone.utc)`) into
 making all 13 datetime columns `DateTime(timezone=True)` + Alembic migration
 `da96efc5089e`. `src/db/models.py`,
 `src/db/migrations/versions/da96efc5089e_tz_aware_timestamp_columns.py`.
+
+### passlib 1.7.4 + bcrypt 5.0.0 incompatible — auth register/login broken — DEFERRED to P4
+`passlib[bcrypt]>=1.7.4` resolved passlib 1.7.4 with bcrypt 5.0.0, which removed the
+`__about__` attribute passlib reads and trips passlib's backend 72-byte self-test
+(`ValueError: password cannot be longer than 72 bytes`). Result: `hash_password` /
+`/auth/register` / `/auth/login` raise 500 in this environment. Pre-existing
+dependency-compat bug (not P3 scope). The P3-T0 e2e test works around it by seeding
+the user row + minting a JWT via `create_access_token`. Real fix (pin a compatible
+bcrypt, or switch to the bcrypt lib directly) belongs to P4-T1 (auth hardening).
+`src/api/dependencies.py` (`hash_password`), `pyproject.toml`.
