@@ -46,3 +46,15 @@ After the P1-T4 honesty pass, `README.md` still carries legacy `Adobe` /
 `adobe-genai-project` branding, a "patent-pending" claim near the footer, and a
 back-to-top anchor pointing at an old `#adobe-genai...` slug. Out of scope for the
 P1-T4 feature-claim reconciliation; flag for a later branding/legal pass.
+
+## P3 (discovered during Phase 3)
+
+### tz-aware datetimes written into `TIMESTAMP WITHOUT TIME ZONE` columns — FIXED in P3-T0b
+The repos/worker write tz-aware datetimes (`datetime.now(timezone.utc)`) into
+`jobs.started_at` / `jobs.completed_at` (and similar `created_at`/`updated_at`/
+`checked_at`/`recorded_at` via `onupdate`), but `src/db/models.py` mapped them as
+`TIMESTAMP WITHOUT TIME ZONE`, so real Postgres raised `DBAPIError` and
+`process_campaign_job` could not reach a terminal state (mocks hid it). Fixed by
+making all 13 datetime columns `DateTime(timezone=True)` + Alembic migration
+`da96efc5089e`. `src/db/models.py`,
+`src/db/migrations/versions/da96efc5089e_tz_aware_timestamp_columns.py`.

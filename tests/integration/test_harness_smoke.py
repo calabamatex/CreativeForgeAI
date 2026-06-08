@@ -18,9 +18,9 @@ import uuid
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import IntegrityError
 
-from src.db.models import Campaign, GeneratedAsset
+from src.db.models import Campaign, GeneratedAsset, Job
 
 pytestmark = pytest.mark.asyncio
 
@@ -169,12 +169,13 @@ async def test_pool_drives_real_task(
     by observing that our supplied ``process_campaign`` was invoked with the
     campaign's brief.
 
-    NOTE: the task's own ``job_repo.update_progress`` writes a tz-AWARE
-    datetime into ``jobs.started_at``, which is a ``TIMESTAMP WITHOUT TIME
-    ZONE`` column — a pre-existing app/schema mismatch the real DB rejects. The
-    harness correctly surfaces this (mocked sessions could not). It is tracked
-    separately and is out of scope for the harness itself; here we assert the
-    real coroutine ran rather than depending on a successful commit.
+    The task's own ``job_repo.update_progress`` / ``complete`` write tz-AWARE
+    datetimes into ``jobs.started_at`` / ``jobs.completed_at``. Since P3-T0b
+    those columns are ``TIMESTAMP WITH TIME ZONE``, so the real task now drives
+    the job all the way to a terminal ``"completed"`` state against real
+    Postgres (this previously raised a ``DBAPIError`` from the tz mismatch —
+    see docs/FOUND_ISSUES.md P3-T0b). We assert both that our supplied
+    ``process_campaign`` was invoked AND that the job reached ``"completed"``.
     """
     from src.db.repositories import CampaignRepository, JobRepository
 
@@ -188,6 +189,7 @@ async def test_pool_drives_real_task(
         brief={
             "campaign_id": "HARNESS-DRIVE-001",
             "campaign_name": "Drive Me",
+            "brand_name": "Brand",
             "products": [
                 {
                     "product_id": "P1",
@@ -201,7 +203,8 @@ async def test_pool_drives_real_task(
             "campaign_message": {
                 "locale": "en-US",
                 "headline": "Hi",
-                "call_to_action": "Buy",
+                "subheadline": "There",
+                "cta": "Buy",
             },
         },
     )
@@ -217,17 +220,53 @@ async def test_pool_drives_real_task(
     )
     assert fake_arq_pool.count_for_job_id(str(job.id)) == 1
 
-    # Driving runs the REAL ``process_campaign_job`` against real Postgres. The
-    # task's first ``update_progress(5, "validating")`` writes a tz-aware
-    # datetime into the ``TIMESTAMP WITHOUT TIME ZONE`` ``started_at`` column,
-    # which real Postgres rejects (a pre-existing app/schema mismatch the
-    # harness surfaces — a mocked session would have silently swallowed it).
-    # Catching that proves the real task code path executed against the real DB.
-    with pytest.raises(DBAPIError) as exc_info:
-        await fake_arq_pool.drive(
-            str(campaign.id), str(job.id), session=real_db_session
+    # Track that the REAL task actually invoked our supplied pipeline hook.
+    seen_briefs = []
+
+    async def _record_process_campaign(brief, brief_path=None):
+        from datetime import datetime
+
+        from src.models import CampaignOutput
+
+        seen_briefs.append(brief)
+        return CampaignOutput(
+            campaign_id=brief.campaign_id,
+            campaign_name=brief.campaign_name,
+            generated_assets=[],
+            total_assets=0,
+            locales_processed=list(getattr(brief, "target_locales", []) or []),
+            products_processed=[p.product_id for p in getattr(brief, "products", [])],
+            processing_time_seconds=0.0,
+            success_rate=1.0,
+            errors=[],
+            generation_timestamp=datetime.now(),
+            technical_metrics=None,
         )
-    assert "time zone" in str(exc_info.value).lower()
+
+    # Driving runs the REAL ``process_campaign_job`` against real Postgres. Since
+    # P3-T0b the ``jobs.started_at`` / ``jobs.completed_at`` columns are
+    # ``TIMESTAMP WITH TIME ZONE``, so the task's tz-aware datetime writes are
+    # accepted and the job drives all the way to a terminal state (no more
+    # ``DBAPIError`` from the old tz mismatch).
+    await fake_arq_pool.drive(
+        str(campaign.id),
+        str(job.id),
+        session=real_db_session,
+        process_campaign=_record_process_campaign,
+    )
+
+    # The real coroutine executed: it invoked our pipeline hook with the brief.
+    assert len(seen_briefs) == 1
+    assert seen_briefs[0].campaign_id == "HARNESS-DRIVE-001"
+
+    # And the job reached a terminal ``"completed"`` state with timestamps set.
+    fetched_job = (
+        await real_db_session.execute(select(Job).where(Job.id == job.id))
+    ).scalar_one()
+    assert fetched_job.status == "completed"
+    assert fetched_job.progress_percent == 100
+    assert fetched_job.started_at is not None
+    assert fetched_job.completed_at is not None
 
     # Roll the session back to a clean state so teardown is tidy.
     await real_db_session.rollback()
