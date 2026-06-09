@@ -7,6 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+
 from tests.integration.conftest import (
     CAMPAIGN_ID,
     USER_ADMIN_ID,
@@ -357,3 +361,196 @@ class TestDeleteCampaign:
         )
 
         assert resp.status_code == 404
+
+
+# ===================================================================
+# Enqueue wiring (P3-T1) -- REAL DB harness + recording fake ARQ pool
+# ===================================================================
+
+
+async def _seed_editor_and_headers(session) -> dict[str, str]:
+    """Seed a real editor user in the test DB and return a real Bearer header.
+
+    Mirrors the e2e test's approach (direct seed + mint, dodging the known
+    passlib/bcrypt env bug). Every subsequent request authenticates through the
+    real ``get_current_user`` against the real test DB.
+    """
+    import uuid as _uuid
+
+    from src.api.dependencies import create_access_token
+    from src.db.models import User
+
+    user = User(
+        id=_uuid.uuid4(),
+        email=f"enq-{_uuid.uuid4().hex[:8]}@example.com",
+        password_hash="$2b$12$placeholder.hash.value.not.used.for.jwt.login.flow",
+        display_name="Enqueue Editor",
+        role="editor",
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    session.add(user)
+    await session.flush()
+
+    token = create_access_token(str(user.id), user.role)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.integration
+class TestEnqueueOnCreate:
+    """POST /campaigns and /reprocess enqueue process_campaign_job (P3-T1)."""
+
+    async def test_create_enqueues_exactly_one_job_with_db_job_id(
+        self, real_app_client, fake_arq_pool
+    ):
+        """Creating a campaign enqueues exactly one job whose _job_id == db job id,
+        and the Job row is committed (queryable) before/at enqueue time.
+        """
+        from src.db.models import Job
+        from src.api.dependencies import get_arq_pool
+
+        client, session = real_app_client
+        headers = await _seed_editor_and_headers(session)
+
+        app = client._transport.app
+
+        async def _override_pool():
+            return fake_arq_pool
+
+        app.dependency_overrides[get_arq_pool] = _override_pool
+
+        campaign_key = f"ENQ-{uuid.uuid4().hex[:8]}"
+        resp = await client.post(
+            "/api/v1/campaigns",
+            headers=headers,
+            json={
+                "campaign_id": campaign_key,
+                "campaign_name": "Enqueue Test",
+                "brand_name": "TechStyle",
+                "image_backend": "firefly",
+                "brief": {"headline": "Go"},
+                "target_locales": ["en-US"],
+                "aspect_ratios": ["1:1"],
+            },
+        )
+
+        assert resp.status_code == 201, resp.text
+        data = resp.json()["data"]
+        job_db_id = data["latest_job"]["id"]
+        campaign_db_id = data["id"]
+
+        # Exactly one live enqueue, _job_id == the DB job id.
+        assert fake_arq_pool.live_job_ids() == [job_db_id]
+        assert fake_arq_pool.count_for_job_id(job_db_id) == 1
+
+        # The single recorded enqueue carries the right function + positional args.
+        record = fake_arq_pool.jobs_for("process_campaign_job")[0]
+        assert record.function_name == "process_campaign_job"
+        assert record.args == (campaign_db_id, job_db_id)
+        assert record.job_id == job_db_id
+
+        # Commit-then-enqueue proof: the Job row is committed and queryable via a
+        # FRESH query (not just pending in the unit-of-work).
+        row = (
+            await session.execute(
+                select(Job).where(Job.id == uuid.UUID(job_db_id))
+            )
+        ).scalar_one_or_none()
+        assert row is not None
+        assert row.status == "queued"
+
+    async def test_duplicate_enqueue_same_job_id_is_deduped(
+        self, real_app_client, fake_arq_pool
+    ):
+        """A second enqueue with the same _job_id is deduped (not run twice)."""
+        from src.api.dependencies import get_arq_pool
+
+        client, session = real_app_client
+        headers = await _seed_editor_and_headers(session)
+
+        app = client._transport.app
+
+        async def _override_pool():
+            return fake_arq_pool
+
+        app.dependency_overrides[get_arq_pool] = _override_pool
+
+        campaign_key = f"ENQ-{uuid.uuid4().hex[:8]}"
+        resp = await client.post(
+            "/api/v1/campaigns",
+            headers=headers,
+            json={
+                "campaign_id": campaign_key,
+                "campaign_name": "Dedupe Test",
+                "brand_name": "TechStyle",
+                "image_backend": "firefly",
+                "brief": {"headline": "Go"},
+                "target_locales": ["en-US"],
+                "aspect_ratios": ["1:1"],
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        job_db_id = resp.json()["data"]["latest_job"]["id"]
+        campaign_db_id = resp.json()["data"]["id"]
+
+        # Simulate a duplicate enqueue for the SAME job id (e.g. a retry/replay).
+        dup = await fake_arq_pool.enqueue_job(
+            "process_campaign_job",
+            campaign_db_id,
+            job_db_id,
+            _job_id=job_db_id,
+        )
+        # ARQ returns None when a job with this _job_id already exists.
+        assert dup is None
+        # Still exactly one LIVE job; the dupe is recorded as deduped.
+        assert fake_arq_pool.live_job_ids() == [job_db_id]
+        assert fake_arq_pool.count_for_job_id(job_db_id) == 2  # 1 live + 1 deduped
+
+    async def test_reprocess_enqueues_job(self, real_app_client, fake_arq_pool):
+        """Reprocessing a campaign enqueues exactly one job whose _job_id == db job id."""
+        import uuid as _uuid
+
+        from src.db.models import Campaign
+        from src.api.dependencies import get_arq_pool
+
+        client, session = real_app_client
+        headers = await _seed_editor_and_headers(session)
+
+        # Seed a campaign directly so we can reprocess it.
+        campaign = Campaign(
+            id=_uuid.uuid4(),
+            campaign_id=f"RP-{_uuid.uuid4().hex[:8]}",
+            campaign_name="Reprocess Me",
+            brand_name="TechStyle",
+            status="completed",
+            image_backend="firefly",
+            brief={"headline": "Go"},
+            target_locales=["en-US"],
+            aspect_ratios=["1:1"],
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(campaign)
+        await session.flush()
+        campaign_db_id = str(campaign.id)
+
+        app = client._transport.app
+
+        async def _override_pool():
+            return fake_arq_pool
+
+        app.dependency_overrides[get_arq_pool] = _override_pool
+
+        resp = await client.post(
+            f"/api/v1/campaigns/{campaign_db_id}/reprocess",
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        job_db_id = resp.json()["data"]["id"]
+
+        assert fake_arq_pool.live_job_ids() == [job_db_id]
+        assert fake_arq_pool.count_for_job_id(job_db_id) == 1
+        record = fake_arq_pool.jobs_for("process_campaign_job")[0]
+        assert record.args == (campaign_db_id, job_db_id)
+        assert record.job_id == job_db_id

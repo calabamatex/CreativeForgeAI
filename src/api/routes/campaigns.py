@@ -13,6 +13,7 @@ import structlog
 
 from src.api.dependencies import (
     check_rate_limit,
+    get_arq_pool,
     get_current_user,
     get_db,
     require_role,
@@ -217,6 +218,7 @@ async def create_campaign(
     body: CampaignCreateRequest,
     user=Depends(require_role(["editor", "admin"])),
     db: AsyncSession = Depends(get_db),
+    pool=Depends(get_arq_pool),
 ):
     """Create a new campaign and queue a generation job."""
     from src.db.models import Campaign, Job  # noqa: E402
@@ -250,7 +252,34 @@ async def create_campaign(
     db.add(job)
     await db.flush()
 
-    logger.info("campaign.created", campaign_id=str(campaign.id), user_id=str(user.id))
+    # Capture ids before commit (expire_on_commit=False keeps the ORM objects
+    # usable, but the response payload only needs these strings to enqueue).
+    campaign_id_str = str(campaign.id)
+    job_id_str = str(job.id)
+
+    # Commit-then-enqueue: the Job/Campaign rows MUST be committed and visible
+    # before the job is enqueued, otherwise the worker can dequeue and query a
+    # row that isn't there yet (the enqueue racing the DB write). We commit
+    # explicitly here; the get_db dependency's end-of-request commit is then a
+    # harmless no-op.
+    await db.commit()
+
+    # Idempotent enqueue: _job_id == the DB job id, so a duplicate enqueue for
+    # the same job is deduped by ARQ (and by the recording fake pool in tests).
+    if pool is not None:
+        await pool.enqueue_job(
+            "process_campaign_job",
+            campaign_id_str,
+            job_id_str,
+            _job_id=job_id_str,
+        )
+
+    logger.info(
+        "campaign.created",
+        campaign_id=campaign_id_str,
+        job_id=job_id_str,
+        user_id=str(user.id),
+    )
 
     return Envelope[CampaignResponse](
         data=_campaign_to_response(campaign, asset_count=0, job=job),
@@ -362,6 +391,7 @@ async def reprocess_campaign(
     campaign_id: uuid.UUID,
     user=Depends(require_role(["editor", "admin"])),
     db: AsyncSession = Depends(get_db),
+    pool=Depends(get_arq_pool),
 ):
     """Queue a new generation job for an existing campaign."""
     from src.db.models import Job  # noqa: E402
@@ -381,7 +411,22 @@ async def reprocess_campaign(
     db.add(job)
     await db.flush()
 
-    logger.info("campaign.reprocess", campaign_id=str(campaign_id), job_id=str(job.id))
+    campaign_id_str = str(campaign.id)
+    job_id_str = str(job.id)
+
+    # Commit-then-enqueue (see create_campaign): the new Job row + the campaign
+    # status flip must be committed before the worker can pick the job up.
+    await db.commit()
+
+    if pool is not None:
+        await pool.enqueue_job(
+            "process_campaign_job",
+            campaign_id_str,
+            job_id_str,
+            _job_id=job_id_str,
+        )
+
+    logger.info("campaign.reprocess", campaign_id=campaign_id_str, job_id=job_id_str)
 
     return Envelope[JobResponse](
         data=JobResponse.model_validate(job),

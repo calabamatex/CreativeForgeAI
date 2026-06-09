@@ -68,3 +68,20 @@ dependency-compat bug (not P3 scope). The P3-T0 e2e test works around it by seed
 the user row + minting a JWT via `create_access_token`. Real fix (pin a compatible
 bcrypt, or switch to the bcrypt lib directly) belongs to P4-T1 (auth hardening).
 `src/api/dependencies.py` (`hash_password`), `pyproject.toml`.
+
+### e2e tripwire XPASSes after P3-T1 alone (not at "step 5") — marker removal owed to P3-T3
+`tests/integration/test_e2e_campaign.py::test_e2e_campaign_enqueue_persist_retrieve`
+is a `@pytest.mark.xfail(strict=True)` tripwire. The P3-T1 brief expected it to
+"advance past step 3 (enqueue) but still XFAIL at step 5 (no assets persisted —
+P3-T2)". In practice the test does NOT depend on P3-T2 production code: it injects
+its OWN persisting `process_campaign` (`_make_persisting_process_campaign`) into
+`fake_arq_pool.drive(...)`, so once enqueue is wired (T1) the whole create ->
+enqueue -> drive -> persist -> retrieve -> reprocess-dedupe chain passes. With
+`strict=True`, that XPASS becomes a FAILURE — the tripwire firing exactly as its
+docstring describes ("XPASSes -> strict failure -> marker removed in P3-T3").
+Proof the underlying behaviour moved: under `--runxfail`, pre-T1 it fails at step 3
+(`live ids []`, create route never enqueues); post-T1 it passes fully. Per the T1
+brief, the marker is NOT removed here — removing it is P3-T3's job. Until then
+`pytest tests/integration` reports this one expected strict-XPASS failure
+(113 passed, 1 "failed" = the tripwire). `tests/integration/test_e2e_campaign.py`
+(xfail marker, line ~204).

@@ -125,6 +125,25 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 # ---------------------------------------------------------------------------
+# ARQ pool dependency  (job enqueue seam)
+# ---------------------------------------------------------------------------
+
+
+async def get_arq_pool(request: Request):
+    """Return the ARQ Redis pool opened by the app lifespan.
+
+    The pool lives on ``app.state.arq_pool`` (set in ``src.api.main`` lifespan).
+    This is the DI seam tests override via
+    ``app.dependency_overrides[get_arq_pool]`` to inject a recording fake pool.
+
+    Returns ``None`` when no pool is present (e.g. fully-mocked unit tests whose
+    ASGI transport never runs the lifespan and never overrides this seam); the
+    enqueue call sites guard on a non-``None`` pool so those tests keep working.
+    """
+    return getattr(request.app.state, "arq_pool", None)
+
+
+# ---------------------------------------------------------------------------
 # Current-user dependency
 # ---------------------------------------------------------------------------
 

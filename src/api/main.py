@@ -14,6 +14,7 @@ import structlog
 from src.api.errors import AppError, app_error_handler, generic_exception_handler
 from src.cache import get_cache
 from src.db.base import close_db, init_db
+from src.jobs.queue import close_arq_pool, create_arq_pool
 
 logger = structlog.get_logger(__name__)
 
@@ -30,8 +31,14 @@ async def lifespan(app: FastAPI):
     await init_db()
     cache = get_cache()
     await cache.connect()
+    # Open the ARQ Redis pool so create/reprocess routes can enqueue jobs.
+    # Fail loud (matching the existing init_db/cache style, which does not
+    # swallow connection errors): if Redis is unreachable at startup the app
+    # should not come up pretending it can dispatch work.
+    app.state.arq_pool = await create_arq_pool()
     yield
     logger.info("api.shutdown")
+    await close_arq_pool(getattr(app.state, "arq_pool", None))
     await cache.close()
     await close_db()
 
