@@ -341,6 +341,7 @@ class CreativeAutomationPipeline:
                     # Generate asset for each ratio
                     for ratio in brief.aspect_ratios:
                         asset_key = f"{locale}_{ratio}"
+                        proc_ms = None
 
                         if product.existing_assets and asset_key in product.existing_assets:
                             existing_path = product.existing_assets[asset_key]
@@ -367,6 +368,9 @@ class CreativeAutomationPipeline:
                             file_path=str(asset_path),
                             generation_method=backend,
                             timestamp=datetime.now(),
+                            # Carry the per-asset image-processing latency so the
+                            # worker can persist ``generation_time_ms`` on the row.
+                            metadata={"generation_time_ms": proc_ms},
                         ))
 
                 if hero_path:

@@ -69,19 +69,29 @@ the user row + minting a JWT via `create_access_token`. Real fix (pin a compatib
 bcrypt, or switch to the bcrypt lib directly) belongs to P4-T1 (auth hardening).
 `src/api/dependencies.py` (`hash_password`), `pyproject.toml`.
 
-### e2e tripwire XPASSes after P3-T1 alone (not at "step 5") — marker removal owed to P3-T3
+### e2e tripwire XPASSes after P3-T1 alone (not at "step 5") — RESOLVED in P3-T2
 `tests/integration/test_e2e_campaign.py::test_e2e_campaign_enqueue_persist_retrieve`
-is a `@pytest.mark.xfail(strict=True)` tripwire. The P3-T1 brief expected it to
+was a `@pytest.mark.xfail(strict=True)` tripwire. The P3-T1 brief expected it to
 "advance past step 3 (enqueue) but still XFAIL at step 5 (no assets persisted —
-P3-T2)". In practice the test does NOT depend on P3-T2 production code: it injects
+P3-T2)". In practice the test did NOT depend on P3-T2 production code: it injected
 its OWN persisting `process_campaign` (`_make_persisting_process_campaign`) into
-`fake_arq_pool.drive(...)`, so once enqueue is wired (T1) the whole create ->
-enqueue -> drive -> persist -> retrieve -> reprocess-dedupe chain passes. With
-`strict=True`, that XPASS becomes a FAILURE — the tripwire firing exactly as its
-docstring describes ("XPASSes -> strict failure -> marker removed in P3-T3").
-Proof the underlying behaviour moved: under `--runxfail`, pre-T1 it fails at step 3
-(`live ids []`, create route never enqueues); post-T1 it passes fully. Per the T1
-brief, the marker is NOT removed here — removing it is P3-T3's job. Until then
-`pytest tests/integration` reports this one expected strict-XPASS failure
-(113 passed, 1 "failed" = the tripwire). `tests/integration/test_e2e_campaign.py`
-(xfail marker, line ~204).
+`fake_arq_pool.drive(...)`, so once enqueue was wired (T1) the whole chain passed
+and `strict=True` turned that XPASS into a FAILURE (the tripwire firing).
+
+**Resolved in P3-T2.** The circular test-supplied persistence hook is gone. The
+test now injects only a *generation-only* fake `process_campaign` (the seam the
+harness already fakes: image-gen returns the mocked tiny PNG, written to a real
+`file_path` on disk) and the REAL worker — `process_campaign_job` →
+`_persist_assets` → `AssetRepository.upsert` (`ON CONFLICT uq_asset_variant DO
+UPDATE`) — does the DB persistence + `storage_key` population. The test therefore
+now guards PRODUCTION persistence code, so the `strict-xfail` marker has been
+REMOVED. `pytest tests/integration -q` is fully green (115 passed, 0 failed, 0
+xpass-failures). Files: `tests/integration/test_e2e_campaign.py` (marker removed;
+`_make_generating_process_campaign`), `src/jobs/tasks.py` (`_persist_assets`),
+`src/db/repositories/asset_repo.py` (`upsert`).
+
+NOTE for P3-T3: the dual-storage `StorageManager` removal and the S3 presigned
+`/assets/{id}/download` verification are still outstanding. Under the in-memory
+fake backend the download endpoint takes the non-local (S3-style) branch and
+returns a 307 redirect to a `memory://` URL, which the e2e test accepts; the
+real local-disk streaming + S3 presign paths are T3's architectural cleanup.
