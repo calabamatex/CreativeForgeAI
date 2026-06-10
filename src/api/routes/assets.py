@@ -165,10 +165,14 @@ async def download_asset(
     asset = await _get_asset_or_404(asset_id, db)
     backend = get_default_storage_backend()
 
-    # Determine the storage key to use
+    # The storage key is the single source of truth for where the bytes live
+    # (it equals the key the worker passed to ``backend.save``). Every asset
+    # persisted by the P3-T3 write path has it populated.
     storage_key = asset.storage_key or ""
+    if not storage_key:
+        raise NotFoundError("Asset storage key", str(asset_id))
 
-    # Infer media type from the key / file_path
+    # Infer media type from the key / file_path.
     _path_hint = storage_key or asset.file_path or ""
     ext = os.path.splitext(_path_hint)[1].lower()
     media_types = {
@@ -180,10 +184,8 @@ async def download_asset(
     }
     media_type = media_types.get(ext, "application/octet-stream")
 
-    # --- S3 backend: redirect to presigned URL ---
+    # --- Non-local (S3 / MinIO) backend: 307 redirect to a presigned URL ---
     if not isinstance(backend, LocalStorageBackend):
-        if not storage_key:
-            raise NotFoundError("Asset storage key", str(asset_id))
         try:
             url = await backend.get_url(storage_key)
         except Exception:
@@ -201,19 +203,21 @@ async def download_asset(
         )
         return RedirectResponse(url=url, status_code=307)
 
-    # --- Local backend: stream the file directly ---
-    # Try storage key first (new path), then fall back to legacy file_path
-    file_path = asset.file_path
-    if storage_key:
-        try:
-            # Attempt to resolve via the backend
-            resolved = backend._resolve_path(storage_key)
-            if resolved.is_file():
-                file_path = str(resolved)
-        except Exception:
-            pass  # fall through to file_path
+    # --- Local backend: resolve the key to a real path and stream it ---
+    # Resolution goes THROUGH the backend so P1-T3 path containment
+    # (``is_relative_to`` in ``LocalStorageBackend._resolve_path``) is honored.
+    try:
+        resolved = backend._resolve_path(storage_key)
+    except Exception:
+        logger.exception(
+            "asset.download.resolve_failed",
+            asset_id=str(asset_id),
+            key=storage_key,
+        )
+        raise NotFoundError("Asset file", str(asset_id))
 
-    if not os.path.isfile(file_path):
+    file_path = str(resolved)
+    if not resolved.is_file():
         raise NotFoundError("Asset file", str(asset_id))
 
     filename = os.path.basename(file_path)

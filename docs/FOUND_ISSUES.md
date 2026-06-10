@@ -90,8 +90,33 @@ xpass-failures). Files: `tests/integration/test_e2e_campaign.py` (marker removed
 `_make_generating_process_campaign`), `src/jobs/tasks.py` (`_persist_assets`),
 `src/db/repositories/asset_repo.py` (`upsert`).
 
-NOTE for P3-T3: the dual-storage `StorageManager` removal and the S3 presigned
-`/assets/{id}/download` verification are still outstanding. Under the in-memory
-fake backend the download endpoint takes the non-local (S3-style) branch and
-returns a 307 redirect to a `memory://` URL, which the e2e test accepts; the
-real local-disk streaming + S3 presign paths are T3's architectural cleanup.
+### dual-storage overlap (StorageManager vs StorageBackend) — RESOLVED in P3-T3
+The redundant double-write is gone. Resolution: **option (a)** — `StorageBackend`
+owns ALL final asset bytes; `StorageManager` is reduced to **report/brief JSON
+only** (plus the intermediate hero-image cache). The boundary is documented in
+the `StorageManager` module docstring (`src/storage.py`) and in
+`docs/ARCHITECTURE.md`.
+
+Single asset-bytes write path: `CreativeAutomationPipeline._generate_asset_for_ratio`
+(`src/pipeline.py`) now produces each asset as in-memory bytes (no disk write) and
+carries them + the canonical `build_asset_key` on `GeneratedAsset.metadata`; the
+worker `_persist_assets` (`src/jobs/tasks.py`) performs the ONE
+`backend.save(key, data, content_type)` per asset, and the key it saves under is
+exactly the key written to `GeneratedAsset.storage_key` (consistency guaranteed).
+The old disk-write → reread round trip is eliminated (a disk read remains only as
+a fallback for callers that materialise the asset first, e.g. the generation-only
+integration fake).
+
+Downloads resolve through the backend (`src/api/routes/assets.py`): `local` →
+`FileResponse` (200) via `LocalStorageBackend._resolve_path` honoring P1-T3
+containment; `s3`/MinIO → 307 redirect to a presigned URL that fetches the same
+bytes. Verified end-to-end against BOTH real backends in
+`tests/integration/test_api_assets.py::TestBackendDownload`
+(local 200 bytes-match + S3/MinIO 307 presigned bytes-match). `pytest
+tests/integration -q` → 117 passed. Files: `src/pipeline.py`, `src/storage.py`,
+`src/jobs/tasks.py`, `src/api/routes/assets.py`,
+`tests/integration/test_api_assets.py`, `docs/ARCHITECTURE.md`.
+
+Deferred (expected under option (a)): report & brief JSON are still written by
+`StorageManager` to local disk — that is by design (reports/briefs, NOT assets),
+and the intermediate hero-image cache likewise stays local.

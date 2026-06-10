@@ -392,3 +392,191 @@ class TestWorkerAssetPersistence:
         )
 
         await session.rollback()
+
+
+# ===================================================================
+# P3-T3: /assets/{id}/download resolves THROUGH the pluggable backend
+# for BOTH a real local filesystem backend AND a real S3/MinIO backend.
+#
+# These tests stand up a REAL backend (not the in-memory fake), patch the
+# storage factory so BOTH the worker (``get_storage_backend``) and the
+# download route (``get_default_storage_backend``) resolve to that SAME
+# instance, drive the real worker to save the bytes ONCE, then download and
+# assert the returned bytes equal the originally generated PNG.
+#
+# * local -> FileResponse (200) streaming the file (P1-T3 containment honored)
+# * s3    -> 307 redirect to a presigned URL whose fetched bytes MATCH
+#
+# The s3 case talks to the Compose MinIO (``integration`` tier, NOT paid).
+# ===================================================================
+
+
+def _patch_factory_to(backend):
+    """Patch both storage-factory entry points to *backend* (one instance)."""
+    from unittest.mock import patch as _patch
+
+    import src.storage_factory as sf
+
+    sf.get_default_storage_backend.cache_clear()
+    return _patch.object(
+        sf, "get_storage_backend", return_value=backend
+    ), _patch.object(
+        sf, "get_default_storage_backend", return_value=backend
+    )
+
+
+async def _create_campaign_and_get_ids(client, headers, fake_arq_pool):
+    ckey = f"DL-{uuid.uuid4().hex[:8]}"
+    create = await client.post(
+        f"{_E2E_API}/campaigns",
+        headers=headers,
+        json={
+            "campaign_id": ckey,
+            "campaign_name": "Download Backend Test",
+            "brand_name": "TechStyle",
+            "image_backend": "firefly",
+            "brief": _e2e_brief_payload(ckey),
+            "target_locales": _E2E_LOCALES,
+            "aspect_ratios": _E2E_RATIOS,
+        },
+    )
+    assert create.status_code == 201, create.text
+    created = create.json()["data"]
+    return created["id"], created["latest_job"]["id"]
+
+
+@pytest.mark.integration
+@pytest.mark.e2e
+class TestBackendDownload:
+    """Download resolves through the backend for real local + real S3/MinIO."""
+
+    async def _run(
+        self, *, backend, client, session, fake_arq_pool, image_backend_mock,
+        out_dir, expected_png,
+    ):
+        headers = await _seed_editor_header(session)
+
+        app = client._transport.app
+        from src.api.dependencies import get_arq_pool
+
+        async def _override_pool():
+            return fake_arq_pool
+
+        app.dependency_overrides[get_arq_pool] = _override_pool
+
+        campaign_db_id, job_db_id = await _create_campaign_and_get_ids(
+            client, headers, fake_arq_pool
+        )
+
+        p1, p2 = _patch_factory_to(backend)
+        with p1, p2:
+            # Drive the REAL worker: it saves bytes ONCE through *backend*.
+            gen = _make_generating_process_campaign(
+                output_dir=out_dir, image_backend=image_backend_mock
+            )
+            await fake_arq_pool.drive(
+                campaign_db_id, job_db_id, session=session, process_campaign=gen
+            )
+
+            resp = await client.get(
+                f"{_E2E_API}/campaigns/{campaign_db_id}/assets", headers=headers
+            )
+            assert resp.status_code == 200, resp.text
+            items = resp.json()["data"]
+            assert len(items) == _E2E_EXPECTED
+            asset_id = items[0]["id"]
+            storage_key = items[0]["storage_key"]
+            assert storage_key, "storage_key must be populated"
+
+            # storage_key consistency: the key in the DB is exactly the key the
+            # backend stored under (so a direct backend.get returns the bytes).
+            stored = await backend.get(storage_key)
+            assert stored == expected_png
+
+            dl = await client.get(
+                f"{_E2E_API}/assets/{asset_id}/download", headers=headers
+            )
+            return dl, storage_key
+
+    async def test_local_backend_streams_file_response(
+        self,
+        real_app_client,
+        fake_arq_pool,
+        image_backend_mock,
+        tmp_path,
+        tiny_png,
+    ):
+        from src.storage_local import LocalStorageBackend
+
+        client, session = real_app_client
+        backend = LocalStorageBackend(base_dir=str(tmp_path / "local_store"))
+
+        dl, storage_key = await self._run(
+            backend=backend,
+            client=client,
+            session=session,
+            fake_arq_pool=fake_arq_pool,
+            image_backend_mock=image_backend_mock,
+            out_dir=str(tmp_path / "gen_out"),
+            expected_png=tiny_png,
+        )
+
+        # Local -> 200 FileResponse streaming the ACTUAL bytes.
+        assert dl.status_code == 200, dl.text
+        assert dl.content == tiny_png
+        assert dl.content.startswith(b"\x89PNG\r\n\x1a\n")
+        # File physically present under the containment-checked base dir.
+        assert backend._resolve_path(storage_key).is_file()
+
+        await session.rollback()
+
+    async def test_s3_backend_redirects_to_working_presigned_url(
+        self,
+        real_app_client,
+        fake_arq_pool,
+        image_backend_mock,
+        tmp_path,
+        tiny_png,
+    ):
+        import httpx
+
+        from src.exceptions import StorageError
+        from src.storage_s3 import S3StorageBackend
+
+        client, session = real_app_client
+        try:
+            backend = S3StorageBackend()
+        except StorageError as exc:
+            pytest.skip(f"S3/MinIO not configured: {exc}")
+
+        # Use a unique key namespace so concurrent runs never collide, and clean
+        # up afterwards.
+        dl, storage_key = await self._run(
+            backend=backend,
+            client=client,
+            session=session,
+            fake_arq_pool=fake_arq_pool,
+            image_backend_mock=image_backend_mock,
+            out_dir=str(tmp_path / "gen_out"),
+            expected_png=tiny_png,
+        )
+
+        try:
+            # S3 -> 307 redirect to a presigned URL.
+            assert dl.status_code == 307, dl.text
+            url = dl.headers["location"]
+            assert url, "redirect must carry a Location header"
+
+            # Fetching the presigned URL returns the SAME bytes.
+            async with httpx.AsyncClient() as http:
+                fetched = await http.get(url)
+            assert fetched.status_code == 200, fetched.text
+            assert fetched.content == tiny_png
+            assert fetched.content.startswith(b"\x89PNG\r\n\x1a\n")
+        finally:
+            # Best-effort cleanup of every key written by this run.
+            for key in await backend.list_keys(
+                storage_key.rsplit("/products/", 1)[0]
+            ):
+                await backend.delete(key)
+            await session.rollback()

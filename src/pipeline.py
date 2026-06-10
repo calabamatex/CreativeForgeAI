@@ -31,6 +31,7 @@ from src.parsers.legal_parser import LegalComplianceParser
 from src.image_processor import ImageProcessorV2 as ImageProcessor
 from src.legal_checker import LegalComplianceChecker
 from src.storage import StorageManager
+from src.storage_backend import build_asset_key
 from src.pipeline_metrics import RawMetricData, compute_technical_metrics
 
 logger = structlog.get_logger(__name__)
@@ -213,7 +214,15 @@ class CreativeAutomationPipeline:
     def _save_hero_image(
         self, hero_bytes: bytes, product_id: str, campaign_id: str
     ) -> str:
-        """Save hero image bytes to disk, return the saved path."""
+        """Save hero image bytes to disk, return the saved path.
+
+        Hero images are an *intermediate* cache (reused across locales/ratios
+        within a run), NOT a final campaign asset. They stay on the local disk
+        via ``StorageManager.output_dir`` so a re-run can reuse them. Final
+        per-variant assets, by contrast, are produced as in-memory bytes by
+        :meth:`_generate_asset_for_ratio` and persisted exactly once through the
+        pluggable :class:`StorageBackend` by the worker (P3-T3).
+        """
         hero_dir = self.storage.output_dir / product_id / campaign_id / "hero"
         hero_dir.mkdir(parents=True, exist_ok=True)
         hero_path = str(hero_dir / f"{product_id}_hero.png")
@@ -221,6 +230,18 @@ class CreativeAutomationPipeline:
         hero_img.save(hero_path, optimize=True, quality=95)
         logger.info("pipeline.hero_saved", path=hero_path)
         return hero_path
+
+    @staticmethod
+    def _encode_image(image: Image.Image, fmt: str) -> bytes:
+        """Encode a PIL image to bytes for the given output format."""
+        buffer = BytesIO()
+        pil_format = "JPEG" if fmt.lower() in ("jpg", "jpeg") else fmt.upper()
+        if pil_format == "JPEG":
+            image = image.convert("RGB")
+            image.save(buffer, format=pil_format, optimize=True, quality=95)
+        else:
+            image.save(buffer, format=pil_format, optimize=True)
+        return buffer.getvalue()
 
     def _generate_asset_for_ratio(
         self,
@@ -230,10 +251,15 @@ class CreativeAutomationPipeline:
         ratio: str,
         brief: CampaignBrief,
         brand_guidelines: Optional[ComprehensiveBrandGuidelines],
-    ) -> Tuple[Path, float]:
+    ) -> Tuple[bytes, str, float]:
         """Process a hero image into a final asset for one aspect ratio.
 
-        Returns (asset_path, processing_time_ms).
+        Produces the final asset as in-memory bytes -- it does NOT write the
+        asset to disk. The single asset-bytes write happens later in the worker
+        (``_persist_assets``) through the pluggable ``StorageBackend``, so there
+        is exactly one write path and no disk-write -> reread redundancy.
+
+        Returns ``(image_bytes, fmt, processing_time_ms)``.
         """
         img_proc_start = time.time()
 
@@ -251,14 +277,16 @@ class CreativeAutomationPipeline:
         proc_ms = (time.time() - img_proc_start) * 1000
 
         output_format = brief.output_formats[0] if brief.output_formats else "png"
-        asset_path = self.storage.get_asset_path(
-            brief.campaign_id, localized_message.locale if hasattr(localized_message, 'locale') else "en-US",
-            product.product_id, ratio, output_format,
+        image_bytes = self._encode_image(final, output_format)
+        logger.info(
+            "pipeline.asset_generated",
+            product_id=product.product_id,
+            ratio=ratio,
+            fmt=output_format,
+            size=len(image_bytes),
         )
-        self.storage.save_image(final, asset_path)
-        logger.info("pipeline.asset_saved", path=str(asset_path))
 
-        return asset_path, proc_ms
+        return image_bytes, output_format, proc_ms
 
     # ------------------------------------------------------------------
     # Main orchestrator
@@ -342,35 +370,66 @@ class CreativeAutomationPipeline:
                     for ratio in brief.aspect_ratios:
                         asset_key = f"{locale}_{ratio}"
                         proc_ms = None
+                        image_bytes: Optional[bytes] = None
+                        output_format = brief.output_formats[0] if brief.output_formats else "png"
 
                         if product.existing_assets and asset_key in product.existing_assets:
                             existing_path = product.existing_assets[asset_key]
                             if Path(existing_path).exists():
                                 logger.info("pipeline.using_existing_asset", ratio=ratio, path=existing_path)
-                                asset_path = Path(existing_path)
+                                # Reuse: load the existing bytes so the SAME
+                                # single backend write path persists them.
+                                with open(existing_path, "rb") as fh:
+                                    image_bytes = fh.read()
+                                output_format = (
+                                    existing_path.rsplit(".", 1)[-1] or "png"
+                                ).lower()
                             else:
                                 logger.warning("pipeline.existing_asset_missing", ratio=ratio)
-                                asset_path, proc_ms = self._generate_asset_for_ratio(
+                                image_bytes, output_format, proc_ms = self._generate_asset_for_ratio(
                                     hero_bytes, localized_message, product, ratio, brief, brand_guidelines
                                 )
                                 metrics.image_processing_total_ms += proc_ms
                         else:
                             logger.info("pipeline.generating_variation", ratio=ratio)
-                            asset_path, proc_ms = self._generate_asset_for_ratio(
+                            image_bytes, output_format, proc_ms = self._generate_asset_for_ratio(
                                 hero_bytes, localized_message, product, ratio, brief, brand_guidelines
                             )
                             metrics.image_processing_total_ms += proc_ms
+
+                        # Canonical storage key -- this is the SINGLE source of
+                        # truth for where the asset lands. The worker saves the
+                        # bytes under exactly this key and writes it to
+                        # ``GeneratedAsset.storage_key``.
+                        storage_key = build_asset_key(
+                            campaign_id=brief.campaign_id,
+                            product_id=product.product_id,
+                            locale=locale,
+                            aspect_ratio=ratio,
+                            fmt=output_format,
+                        )
 
                         generated_assets.append(GeneratedAsset(
                             product_id=product.product_id,
                             locale=locale,
                             aspect_ratio=ratio,
-                            file_path=str(asset_path),
+                            # No on-disk asset is written by the pipeline anymore;
+                            # ``file_path`` mirrors the canonical storage key so
+                            # downstream display/logging stays meaningful.
+                            file_path=storage_key,
                             generation_method=backend,
                             timestamp=datetime.now(),
-                            # Carry the per-asset image-processing latency so the
-                            # worker can persist ``generation_time_ms`` on the row.
-                            metadata={"generation_time_ms": proc_ms},
+                            metadata={
+                                # Carry the per-asset image-processing latency so
+                                # the worker can persist ``generation_time_ms``.
+                                "generation_time_ms": proc_ms,
+                                # Carry the final bytes + canonical key so the
+                                # worker performs the SINGLE backend.save (no
+                                # disk-write -> reread round trip).
+                                "image_bytes": image_bytes,
+                                "storage_key": storage_key,
+                                "fmt": output_format,
+                            },
                         ))
 
                 if hero_path:

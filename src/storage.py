@@ -1,4 +1,24 @@
-"""Storage management for campaign outputs."""
+"""Report/brief storage for campaign outputs (NOT campaign asset bytes).
+
+Storage boundary (P3-T3, dual-storage resolution option *a*)
+------------------------------------------------------------
+``StorageManager`` is the local-filesystem home for **report & brief JSON only**
+plus the intermediate *hero-image* cache:
+
+* per-product campaign **report** JSON (:meth:`save_report`)
+* campaign **brief** backup / update (:meth:`backup_campaign_brief`,
+  :meth:`update_campaign_brief`)
+* intermediate **hero** images (reused within a run; written by the pipeline's
+  ``_save_hero_image``)
+
+It does **NOT** own final campaign **asset** bytes. Every final per-variant
+asset is written EXACTLY ONCE through the pluggable
+:class:`~src.storage_backend.StorageBackend` (local or S3) by the worker
+(``src/jobs/tasks.py::_persist_assets``), under the canonical key from
+:func:`~src.storage_backend.build_asset_key`; that key is what lands in
+``GeneratedAsset.storage_key`` and what ``/assets/{id}/download`` resolves. There
+is no disk-write -> reread round trip and no second asset-bytes writer.
+"""
 import json
 import re
 import shutil
