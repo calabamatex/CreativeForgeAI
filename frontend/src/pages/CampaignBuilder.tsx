@@ -7,6 +7,11 @@ import { useCreateCampaign } from "../hooks/useCampaigns";
 import { ChevronLeft, ChevronRight, Send } from "lucide-react";
 
 const schema = z.object({
+  campaign_id: z
+    .string()
+    .min(3)
+    .max(64)
+    .regex(/^[A-Za-z0-9_-]+$/, "Use letters, numbers, dashes or underscores only"),
   campaign_name: z.string().min(3).max(100),
   brand_name: z.string().min(1),
   target_market: z.string().default("Global"),
@@ -32,6 +37,7 @@ export default function CampaignBuilder() {
   const { register, handleSubmit, watch, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
+      campaign_id: `CAMP-${Date.now()}`,
       image_backend: "firefly",
       target_market: "Global",
       target_audience: "General",
@@ -45,19 +51,21 @@ export default function CampaignBuilder() {
 
   const onSubmit = async (data: FormData) => {
     const brief = {
-      campaign_id: `CAMP-${Date.now()}`,
-      campaign_name: data.campaign_name,
-      brand_name: data.brand_name,
       target_market: data.target_market,
       target_audience: data.target_audience,
       campaign_message: { locale: "en-US", headline: data.headline, subheadline: data.subheadline, cta: data.cta },
       products: [{ product_id: "PROD-001", product_name: "Default Product", product_description: "Product description", product_category: "General", key_features: [] }],
-      aspect_ratios: data.aspect_ratios,
-      image_generation_backend: data.image_backend,
       enable_localization: data.enable_localization,
-      target_locales: data.target_locales,
     };
-    await createCampaign.mutateAsync({ brief, image_backend: data.image_backend });
+    await createCampaign.mutateAsync({
+      campaign_id: data.campaign_id,
+      campaign_name: data.campaign_name,
+      brand_name: data.brand_name,
+      image_backend: data.image_backend,
+      brief,
+      target_locales: data.target_locales,
+      aspect_ratios: data.aspect_ratios,
+    });
     navigate("/campaigns");
   };
 
@@ -77,8 +85,9 @@ export default function CampaignBuilder() {
       <form onSubmit={handleSubmit(onSubmit)} className="bg-white rounded-xl shadow-sm border p-6 space-y-4">
         {step === 0 && (
           <>
+            <div><label className={labelClass}>Campaign ID</label><input {...register("campaign_id")} className={inputClass} placeholder="CAMP-2024-001" />{errors.campaign_id && <p className="text-red-500 text-sm mt-1">{errors.campaign_id.message}</p>}</div>
             <div><label className={labelClass}>Campaign Name</label><input {...register("campaign_name")} className={inputClass} />{errors.campaign_name && <p className="text-red-500 text-sm mt-1">{errors.campaign_name.message}</p>}</div>
-            <div><label className={labelClass}>Brand Name</label><input {...register("brand_name")} className={inputClass} /></div>
+            <div><label className={labelClass}>Brand Name</label><input {...register("brand_name")} className={inputClass} />{errors.brand_name && <p className="text-red-500 text-sm mt-1">{errors.brand_name.message}</p>}</div>
             <div><label className={labelClass}>Target Market</label><input {...register("target_market")} className={inputClass} /></div>
             <div><label className={labelClass}>Image Backend</label>
               <select {...register("image_backend")} className={inputClass}>
@@ -118,6 +127,7 @@ export default function CampaignBuilder() {
           <div className="space-y-3">
             <h3 className="font-semibold text-gray-900">Review</h3>
             <dl className="grid grid-cols-2 gap-2 text-sm">
+              <dt className="text-gray-500">Campaign ID</dt><dd className="font-medium">{values.campaign_id}</dd>
               <dt className="text-gray-500">Campaign</dt><dd className="font-medium">{values.campaign_name}</dd>
               <dt className="text-gray-500">Brand</dt><dd className="font-medium">{values.brand_name}</dd>
               <dt className="text-gray-500">Backend</dt><dd className="font-medium">{values.image_backend}</dd>
