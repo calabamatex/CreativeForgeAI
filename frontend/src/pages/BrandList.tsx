@@ -28,7 +28,7 @@ export default function BrandList() {
           {brands.map((b) => (
             <Link key={b.id} to={`/brands/${b.id}`} className="bg-white rounded-xl border p-5 hover:shadow-md transition-shadow">
               <h3 className="font-semibold text-gray-900">{b.name}</h3>
-              <div className="flex gap-1 mt-2">{b.primary_colors.map((c, i) => <div key={i} className="w-6 h-6 rounded" style={{ backgroundColor: c }} />)}</div>
+              <div className="flex gap-1 mt-2">{(b.primary_colors ?? []).map((c, i) => <div key={i} className="w-6 h-6 rounded" style={{ backgroundColor: c }} />)}</div>
               <p className="text-sm text-gray-500 mt-2">{b.primary_font}{b.secondary_font ? ` / ${b.secondary_font}` : ""}</p>
               <p className="text-xs text-gray-400 mt-1">{formatDate(b.created_at)}</p>
             </Link>

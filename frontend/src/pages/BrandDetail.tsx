@@ -18,7 +18,7 @@ export default function BrandDetail() {
       <div className="bg-white rounded-xl border p-6 space-y-4">
         <div>
           <h3 className="text-sm font-medium text-gray-500 mb-2">Primary Colors</h3>
-          <div className="flex gap-2">{brand.primary_colors.map((c, i) => <div key={i} className="w-10 h-10 rounded-lg border" style={{ backgroundColor: c }} title={c} />)}</div>
+          <div className="flex gap-2">{(brand.primary_colors ?? []).map((c, i) => <div key={i} className="w-10 h-10 rounded-lg border" style={{ backgroundColor: c }} title={c} />)}</div>
         </div>
         <div>
           <h3 className="text-sm font-medium text-gray-500 mb-1">Fonts</h3>
