@@ -83,10 +83,12 @@ addopts = [
 asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow",
-    "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests (real Postgres/Redis/MinIO, no paid APIs)",
+    "unit: marks tests as unit tests (no I/O, fully mocked)",
     "e2e: marks tests as end-to-end tests",
     "performance: marks tests as performance tests",
+    "paid: makes REAL paid provider calls (costs money). SKIPPED by default; set RUN_PAID_TESTS=1 to run.",
+    "paid_matrix: the full backend x locale x ratio worst-case matrix (~45 paid calls). NEVER in the default/PR-CI path; requires BOTH RUN_PAID_TESTS=1 and RUN_FULL_MATRIX=1.",
 ]
 
 [tool.coverage.run]

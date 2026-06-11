@@ -213,14 +213,35 @@ def _make_app(real_db_session):
 # ---------------------------------------------------------------------------
 
 
-async def test_ws_streams_real_progress_then_closes_on_terminal(real_db_session):
+async def test_ws_streams_real_progress_then_closes_on_terminal(
+    real_db_session, monkeypatch
+):
     """The socket emits INCREASING real progress and a terminal ``completed``.
 
-    Drives the job row through 25 -> 60 -> 100/completed from the same loop and
-    asserts the client sees those exact real fields (not a fake heartbeat), in
-    increasing order, followed by a terminal ``completed`` message, after which
-    the socket CLOSES.
+    Drives the job row through 25 -> 60 -> 100/completed and asserts the client
+    sees those exact real fields (not a fake heartbeat), in increasing order,
+    followed by a terminal ``completed`` message, after which the socket CLOSES.
+
+    DETERMINISM (P6-T1 flake fix): the previous version started a background
+    ``_advance()`` task that mutated the row on a fixed ``asyncio.sleep(0.6)``
+    cadence, RACING the server's 0.5s poll loop — occasionally a transition
+    landed between two polls and a frame was missed/merged, flaking the run.
+    This version instead:
+
+      * shrinks the server poll interval to ~10ms via ``WS_POLL_INTERVAL_SECONDS``
+        (read at connection time by ``src.api.routes.ws``), and
+      * drives each transition IN LOCKSTEP with the received frames: it reads
+        the next CHANGED frame, then applies the next transition, then reads the
+        next changed frame, etc.
+
+    Because the endpoint emits ONLY on a changed ``(progress, stage, status)``
+    signature, advancing strictly after observing the prior frame guarantees we
+    see every distinct state exactly once, in order — no wall-clock race.
     """
+    # Drive the server poll loop fast so each transition is observed promptly,
+    # then synchronize on the emitted frames (below) for determinism.
+    monkeypatch.setenv("WS_POLL_INTERVAL_SECONDS", "0.01")
+
     session = real_db_session
     campaign_id, job_id, owner_id = await _seed_campaign_and_job(session, status="queued")
 
@@ -232,33 +253,47 @@ async def test_ws_streams_real_progress_then_closes_on_terminal(real_db_session)
 
     received: list[dict] = []
 
-    async def _advance():
-        """Step the job through real progress states with small gaps."""
-        # Let the WS connect + emit the initial (queued, 0) frame.
-        await asyncio.sleep(0.6)
-        await repo.update_progress(uuid.UUID(job_id), 25, "validating")
-        await session.commit()
-        await asyncio.sleep(0.6)
-        await repo.update_progress(uuid.UUID(job_id), 60, "generating")
-        await session.commit()
-        await asyncio.sleep(0.6)
-        await repo.complete(uuid.UUID(job_id), result={"ok": True})
-        await session.commit()
+    async def _read_next_changed(ws, after_progress: int) -> dict:
+        """Return the next frame whose progress advanced past *after_progress*.
+
+        The fast poll loop can re-emit the current state at most once before our
+        transition commits; skip any frame that has not advanced so we
+        deterministically land on the NEXT distinct state.
+        """
+        while True:
+            msg = await ws.receive_json(timeout=10)
+            received.append(msg)
+            if msg["progress_percent"] > after_progress:
+                return msg
 
     async with _ASGIWebSocketClient(
         app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
     ) as ws:
-        advancer = asyncio.ensure_future(_advance())
-        try:
-            while True:
-                msg = await ws.receive_json(timeout=10)
-                received.append(msg)
-                if msg.get("status") in {"completed", "failed", "cancelled"}:
-                    # After a terminal progress frame the server must close.
-                    await ws.expect_close(timeout=5)
-                    break
-        finally:
-            await advancer
+        # 1) Initial real frame: queued at 0.
+        first = await ws.receive_json(timeout=10)
+        received.append(first)
+        assert first["progress_percent"] == 0 and first["status"] == "queued"
+
+        # 2) Advance to 25/validating, then read the frame that reflects it.
+        await repo.update_progress(uuid.UUID(job_id), 25, "validating")
+        await session.commit()
+        frame_25 = await _read_next_changed(ws, after_progress=0)
+        assert frame_25["progress_percent"] == 25
+        assert frame_25["current_stage"] == "validating"
+
+        # 3) Advance to 60/generating, then read the frame that reflects it.
+        await repo.update_progress(uuid.UUID(job_id), 60, "generating")
+        await session.commit()
+        frame_60 = await _read_next_changed(ws, after_progress=25)
+        assert frame_60["progress_percent"] == 60
+        assert frame_60["current_stage"] == "generating"
+
+        # 4) Complete -> terminal frame at 100/completed, then the server closes.
+        await repo.complete(uuid.UUID(job_id), result={"ok": True})
+        await session.commit()
+        terminal_frame = await _read_next_changed(ws, after_progress=60)
+        assert terminal_frame["status"] == "completed"
+        await ws.expect_close(timeout=5)
 
     # --- assertions --------------------------------------------------------
     # Every message carries REAL job fields, never a bare heartbeat.
