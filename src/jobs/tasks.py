@@ -134,6 +134,46 @@ async def _persist_assets(session, campaign_pk, output, generation_method: str) 
     return written
 
 
+async def _persist_metrics(session, campaign_pk, output) -> bool:
+    """Persist the run's real ``TechnicalMetrics`` as a ``campaign_metrics`` row.
+
+    The pipeline computes a ``TechnicalMetrics`` (api calls, cache hit/miss +
+    rate, response/processing/localization/compliance timings, peak memory)
+    during the run and hands it back on ``output.technical_metrics``. We store
+    the full payload verbatim in the ``technical_metrics`` JSONB column so the
+    metrics endpoints serve the REAL recorded values instead of hardcoded
+    zeros.
+
+    Like the asset rows, this is flushed but NOT committed here -- the caller
+    commits it together with the job's terminal ``completed`` status so the
+    metrics row is atomic with the rest of the run (P3-T2 commit boundary).
+
+    Returns ``True`` if a row was written, ``False`` if the run carried no
+    technical metrics (e.g. the generation-only integration fake).
+    """
+    from src.db.repositories import MetricsRepository
+
+    tech = getattr(output, "technical_metrics", None)
+    if tech is None:
+        return False
+
+    # ``technical_metrics`` may be a pydantic model (production) or already a
+    # plain dict (some fakes); normalise to a JSON-serialisable dict.
+    if hasattr(tech, "model_dump"):
+        payload = tech.model_dump(mode="json")
+    elif isinstance(tech, dict):
+        payload = tech
+    else:  # pragma: no cover - defensive
+        return False
+
+    if not payload:
+        return False
+
+    metrics_repo = MetricsRepository(session)
+    await metrics_repo.record(campaign_id=campaign_pk, technical_metrics=payload)
+    return True
+
+
 async def process_campaign_job(ctx, campaign_id: str, job_id: str):
     """ARQ worker function to process a campaign in the background."""
     from src.db.base import async_session_factory
@@ -176,6 +216,13 @@ async def process_campaign_job(ctx, campaign_id: str, job_id: str):
                 session, campaign.id, output, campaign.image_backend
             )
 
+            # Persist the run's REAL TechnicalMetrics (api calls, cache hit
+            # rate, timings, peak memory) as a campaign_metrics row, within
+            # this same transaction so it commits atomically with the job's
+            # terminal status (no metrics row attributed to a non-completed
+            # run, and a completed run always has its metrics visible).
+            metrics_persisted = await _persist_metrics(session, campaign.id, output)
+
             # Strip the transient inline asset bytes before serialising the job
             # result: they were only an in-memory carrier for the single
             # backend.save above and must NOT be JSON-serialised into the
@@ -193,6 +240,7 @@ async def process_campaign_job(ctx, campaign_id: str, job_id: str):
                 campaign_id=campaign_id,
                 job_id=job_id,
                 assets_persisted=persisted,
+                metrics_persisted=metrics_persisted,
             )
         except Exception as e:
             logger.error("job.failed", campaign_id=campaign_id, job_id=job_id, error=str(e))

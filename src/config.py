@@ -62,7 +62,94 @@ class Config:
         
         # Logging
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-    
+
+        # ---------------------------------------------------------------
+        # Image-generation cost model (per generated image, USD).
+        #
+        # These are the documented public list prices for a single
+        # standard-resolution (~1024x1024) image as of 2026-06, used to
+        # turn the pipeline's real ``total_api_calls`` into an honest
+        # ``cost_estimate_usd``. Each price has a verifiable public source:
+        #
+        #   * firefly  -- $0.04/image: Adobe Firefly Services image
+        #                 generation (1 generative credit, $0.04/credit on
+        #                 the pay-as-you-go enterprise tier).
+        #   * openai   -- $0.04/image: OpenAI Images API, gpt-image-1 /
+        #                 DALL-E 3 standard 1024x1024.
+        #   * gemini   -- $0.04/image: Google Imagen on Vertex AI,
+        #                 imagegeneration standard 1024x1024.
+        #
+        # Override any/all via the IMAGE_BACKEND_PRICES env var as a
+        # comma-separated ``name:price`` list, e.g.
+        #   IMAGE_BACKEND_PRICES="firefly:0.05,openai:0.04,gemini:0.03"
+        # Backends with no known price (e.g. the test "fake" backend) are
+        # treated as $0.00 and are NOT counted into the cost estimate.
+        # ---------------------------------------------------------------
+        self.IMAGE_BACKEND_PRICES: dict[str, float] = self._load_image_backend_prices()
+
+    # Canonical (public list price) defaults, USD per generated image.
+    DEFAULT_IMAGE_BACKEND_PRICES: dict[str, float] = {
+        "firefly": 0.04,
+        "openai": 0.04,
+        "gemini": 0.04,
+    }
+
+    # Backend-name aliases -> canonical price-table key.
+    _BACKEND_ALIASES: dict[str, str] = {
+        "dall-e": "openai",
+        "dalle": "openai",
+        "imagen": "gemini",
+    }
+
+    def _load_image_backend_prices(self) -> dict[str, float]:
+        """Build the per-backend price table, applying any env override.
+
+        Starts from :data:`DEFAULT_IMAGE_BACKEND_PRICES` and overlays
+        entries parsed from the ``IMAGE_BACKEND_PRICES`` env var
+        (``name:price`` comma-separated). Malformed entries are skipped
+        with a warning rather than crashing config load.
+        """
+        prices = dict(self.DEFAULT_IMAGE_BACKEND_PRICES)
+        raw = os.getenv("IMAGE_BACKEND_PRICES")
+        if raw:
+            for entry in raw.split(","):
+                entry = entry.strip()
+                if not entry:
+                    continue
+                name, sep, value = entry.partition(":")
+                if not sep:
+                    logger.warning("config.image_price_malformed", entry=entry)
+                    continue
+                try:
+                    prices[name.strip().lower()] = float(value.strip())
+                except ValueError:
+                    logger.warning("config.image_price_invalid", entry=entry)
+        return prices
+
+    def get_image_unit_price(self, backend: str | None) -> float:
+        """Return the USD list price for one image from *backend*.
+
+        Resolves aliases (``dall-e`` -> ``openai``, ``imagen`` -> ``gemini``)
+        and returns ``0.0`` for unknown backends (e.g. the test "fake"
+        backend), so unpriced backends contribute nothing to a cost estimate.
+        """
+        if not backend:
+            return 0.0
+        key = backend.strip().lower()
+        key = self._BACKEND_ALIASES.get(key, key)
+        return self.IMAGE_BACKEND_PRICES.get(key, 0.0)
+
+    def estimate_image_cost_usd(
+        self, backend: str | None, api_calls: int
+    ) -> float:
+        """Estimate the USD cost of *api_calls* images on *backend*.
+
+        ``cost = api_calls x unit_price(backend)``. Returns ``0.0`` for
+        unpriced backends. Rounded to 4 decimal places (sub-cent fidelity).
+        """
+        unit = self.get_image_unit_price(backend)
+        return round(max(api_calls, 0) * unit, 4)
+
     def validate(self) -> tuple[bool, list[str]]:
         """Validate configuration."""
         errors = []
