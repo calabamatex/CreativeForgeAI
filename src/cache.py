@@ -252,6 +252,57 @@ class RedisCache:
         except Exception as exc:  # pragma: no cover - exercised via raise path
             raise CacheUnavailable(f"denylist check failed: {exc}") from exc
 
+    # ------------------------------------------------------------------
+    # Rate-limiting counters  (P4-T2)
+    # ------------------------------------------------------------------
+    #
+    # A fixed-window counter shared across all processes. Unlike the denylist
+    # (a security primitive that fails CLOSED), rate limiting is an availability
+    # control: ``incr_rate_limit`` raises :class:`CacheUnavailable` on a Redis
+    # outage so the caller can fall back to an in-process limiter (fail OPEN to
+    # the in-memory limiter) rather than locking everyone out.
+
+    _RATE_PREFIX = "ratelimit:"
+
+    @staticmethod
+    def _rate_key(bucket_key: str, window_start: int) -> str:
+        return f"{RedisCache._RATE_PREFIX}{bucket_key}:{window_start}"
+
+    async def incr_rate_limit(
+        self, bucket_key: str, window_seconds: int, now: float
+    ) -> tuple[int, int]:
+        """Atomically increment the fixed-window counter for *bucket_key*.
+
+        The window is ``[window_start, window_start + window_seconds)`` where
+        ``window_start = floor(now / window_seconds) * window_seconds``. INCR
+        and EXPIRE are issued in a single pipeline so concurrent requests count
+        correctly and the key self-expires at the end of its window (no manual
+        cleanup, no unbounded growth).
+
+        Returns ``(count, retry_after_seconds)`` where ``count`` is this
+        request's position in the window (1 = first) and ``retry_after_seconds``
+        is how long until the current window rolls over.
+
+        Raises :class:`CacheUnavailable` when Redis is unreachable so the caller
+        can fail OPEN to an in-memory limiter.
+        """
+        if self._redis is None:
+            raise CacheUnavailable("Redis unavailable; cannot count rate limit")
+        window_start = int(now // window_seconds) * window_seconds
+        redis_key = self._key(self._rate_key(bucket_key, window_start))
+        retry_after = max(1, int(window_start + window_seconds - now))
+        try:
+            pipe = self._redis.pipeline()
+            pipe.incr(redis_key)
+            # Expire slightly beyond the window so a key created late in the
+            # window still covers the whole window; harmless overlap.
+            pipe.expire(redis_key, window_seconds + 1)
+            results = await pipe.execute()
+            count = int(results[0])
+        except Exception as exc:  # pragma: no cover - exercised via raise path
+            raise CacheUnavailable(f"rate-limit incr failed: {exc}") from exc
+        return count, retry_after
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton

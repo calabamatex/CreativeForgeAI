@@ -74,8 +74,18 @@ class RateLimitError(AppError):
     status_code = 429
     error_type = "rate_limit_exceeded"
 
-    def __init__(self, detail: str = "Rate limit exceeded. Please try again later.") -> None:
-        super().__init__(detail)
+    def __init__(
+        self,
+        detail: str = "Rate limit exceeded. Please try again later.",
+        retry_after: int | None = None,
+    ) -> None:
+        # ``retry_after`` (seconds) is surfaced both as an RFC 7807 extension
+        # member and as the standard ``Retry-After`` response header.
+        self.retry_after = retry_after
+        extra: dict[str, Any] = {}
+        if retry_after is not None:
+            extra["retry_after"] = retry_after
+        super().__init__(detail, **extra)
 
 
 class BadRequestError(AppError):
@@ -144,7 +154,11 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
         detail=exc.detail,
         extra=exc.extra if exc.extra else None,
     )
-    return JSONResponse(status_code=exc.status_code, content=body)
+    headers: dict[str, str] | None = None
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is not None:
+        headers = {"Retry-After": str(int(retry_after))}
+    return JSONResponse(status_code=exc.status_code, content=body, headers=headers)
 
 
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:

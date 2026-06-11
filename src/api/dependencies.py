@@ -336,8 +336,27 @@ def require_role(allowed_roles: list[str]):
 
 
 # ---------------------------------------------------------------------------
-# In-memory rate limiter (suitable for single-process; swap to Redis for prod)
+# Rate limiter
 # ---------------------------------------------------------------------------
+#
+# Primary path: a Redis-backed fixed-window counter (``RedisCache.incr_rate_limit``)
+# shared across all worker processes, so the configured per-minute limit holds
+# in aggregate regardless of worker count and survives restarts.
+#
+# Key scheme: limits are keyed by USER ID when the request is authenticated
+# (``ratelimit:user:<id>:<window>``), else by the CLIENT IP
+# (``ratelimit:ip:<ip>:<window>``). The client IP is derived safely — see
+# ``_client_ip`` — so a spoofed ``X-Forwarded-For`` cannot let an attacker evade
+# or poison another client's IP bucket.
+#
+# Fallback path: if Redis is unavailable (``CacheUnavailable``) the limiter
+# fails OPEN to a per-process in-memory deque limiter (``_rate_buckets``). This
+# keeps local dev / tests without Redis working and keeps the API available
+# during a Redis blip. This is deliberately the opposite policy from the JWT
+# revocation denylist (which fails CLOSED): rate limiting is an availability
+# control, not a security boundary, so degrading to best-effort per-process
+# limiting is preferable to rejecting all traffic. The fallback is EXPLICIT
+# (we catch ``CacheUnavailable``), not accidental.
 
 _rate_buckets: dict[str, deque[float]] = defaultdict(deque)
 
@@ -346,40 +365,99 @@ RATE_LIMIT_UNAUTH: int = int(os.getenv("RATE_LIMIT_UNAUTH", "20"))  # per minute
 RATE_WINDOW_SECONDS: int = 60
 
 
-def _client_key(request: Request) -> str:
-    """Derive a rate-limit key from the request (IP + user id if present)."""
+def _client_ip(request: Request) -> str:
+    """Return the client IP, honouring ``X-Forwarded-For`` only when safe.
+
+    Default (and whenever the immediate socket peer is not a configured trusted
+    proxy): the socket peer ``request.client.host`` is used and any
+    ``X-Forwarded-For`` header is IGNORED — a header an arbitrary client sets
+    cannot influence which IP bucket it lands in.
+
+    When ``TRUST_FORWARDED_FOR`` is enabled AND the socket peer is in
+    ``TRUSTED_PROXIES``, we walk the XFF chain from the RIGHT (proxy-appended
+    end) and return the first address that is not itself a trusted proxy — i.e.
+    the closest untrusted hop, the real client as seen by our trusted edge. A
+    spoofer can only prepend entries to the LEFT of the chain, which this model
+    skips over, so spoofing is neutralised.
+    """
+    from src.config import get_config  # lazy import to avoid import cycles
+
+    config = get_config()
+    peer = request.client.host if request.client else "unknown"
+
+    if not config.TRUST_FORWARDED_FOR or peer not in config.TRUSTED_PROXIES:
+        return peer
+
     forwarded = request.headers.get("x-forwarded-for")
-    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+    if not forwarded:
+        return peer
+
+    hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+    # Walk right-to-left, skipping trusted proxies; first untrusted hop wins.
+    for hop in reversed(hops):
+        if hop not in config.TRUSTED_PROXIES:
+            return hop
+    # Whole chain is trusted proxies (unusual) -- fall back to the peer.
+    return peer
+
+
+def _client_key(request: Request) -> str:
+    """Derive a rate-limit bucket key: user id when authed, else safe client IP."""
     user = getattr(request.state, "user", None)
-    if user:
+    if user is not None:
         return f"user:{user.id}"
-    return f"ip:{ip}"
+    return f"ip:{_client_ip(request)}"
+
+
+def _check_rate_limit_in_memory(key: str, limit: int) -> None:
+    """Per-process fallback limiter (deque sliding window).
+
+    Used only when Redis is unavailable. O(1) amortised popleft. Not shared
+    across processes, so under multiple workers the effective limit multiplies
+    — acceptable as a degraded fail-open mode (see module docstring above).
+    """
+    now = time.monotonic()
+    bucket = _rate_buckets[key]
+    cutoff = now - RATE_WINDOW_SECONDS
+    while bucket and bucket[0] <= cutoff:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        raise RateLimitError(
+            f"Rate limit of {limit} requests per minute exceeded",
+            retry_after=RATE_WINDOW_SECONDS,
+        )
+    bucket.append(now)
 
 
 async def check_rate_limit(request: Request):
     """Dependency that enforces per-client rate limiting.
 
-    Authenticated users get ``RATE_LIMIT_AUTH`` requests/min;
-    anonymous clients get ``RATE_LIMIT_UNAUTH`` requests/min.
-
-    Uses a deque-based sliding window -- O(1) amortised popleft instead
-    of rebuilding the entire list each request.
+    Authenticated users get ``RATE_LIMIT_AUTH`` requests/min; anonymous clients
+    get ``RATE_LIMIT_UNAUTH`` requests/min, over a fixed 60s window. Counters
+    live in Redis and are shared across processes; on a Redis outage we fall
+    back to a per-process in-memory limiter (fail-open). On limit exhaustion
+    raises :class:`RateLimitError` (HTTP 429, RFC 7807 body, ``Retry-After``).
     """
-    now = time.monotonic()
+    import time as _time
+
     key = _client_key(request)
-    is_authed = hasattr(request.state, "user") and request.state.user is not None
+    is_authed = getattr(request.state, "user", None) is not None
     limit = RATE_LIMIT_AUTH if is_authed else RATE_LIMIT_UNAUTH
 
-    bucket = _rate_buckets[key]
-    cutoff = now - RATE_WINDOW_SECONDS
+    from src.cache import CacheUnavailable, get_cache  # lazy import
 
-    # Prune expired timestamps from the front (oldest first)
-    while bucket and bucket[0] <= cutoff:
-        bucket.popleft()
-
-    if len(bucket) >= limit:
-        raise RateLimitError(
-            f"Rate limit of {limit} requests per minute exceeded"
+    try:
+        count, retry_after = await get_cache().incr_rate_limit(
+            key, RATE_WINDOW_SECONDS, _time.time()
         )
+    except CacheUnavailable as exc:
+        # Fail OPEN to the per-process limiter (availability over strictness).
+        logger.warning("ratelimit.redis_unavailable_fallback", error=str(exc))
+        _check_rate_limit_in_memory(key, limit)
+        return
 
-    bucket.append(now)
+    if count > limit:
+        raise RateLimitError(
+            f"Rate limit of {limit} requests per minute exceeded",
+            retry_after=retry_after,
+        )
