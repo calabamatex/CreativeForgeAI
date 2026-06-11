@@ -59,7 +59,10 @@ making all 13 datetime columns `DateTime(timezone=True)` + Alembic migration
 `da96efc5089e`. `src/db/models.py`,
 `src/db/migrations/versions/da96efc5089e_tz_aware_timestamp_columns.py`.
 
-### passlib 1.7.4 + bcrypt 5.0.0 incompatible — auth register/login broken — DEFERRED to P4
+### passlib 1.7.4 + bcrypt 5.0.0 incompatible — auth register/login broken — FIXED in P4-T0
+**FIXED (P4-T0):** Replaced passlib with the `bcrypt` library directly in `src/api/dependencies.py` (`hash_password`/`verify_password`, cost 12); passwords are SHA-256+base64 pre-hashed before bcrypt to sidestep the 72-byte limit without truncating; `verify_password` returns `False` on malformed hashes. Dropped `passlib[bcrypt]` from `pyproject.toml` (now `bcrypt>=4.1.0`) and uninstalled passlib from the venv. Stored hashes remain standard `$2b$`; auth tests + full integration suite green.
+
+
 `passlib[bcrypt]>=1.7.4` resolved passlib 1.7.4 with bcrypt 5.0.0, which removed the
 `__about__` attribute passlib reads and trips passlib's backend 72-byte self-test
 (`ValueError: password cannot be longer than 72 bytes`). Result: `hash_password` /

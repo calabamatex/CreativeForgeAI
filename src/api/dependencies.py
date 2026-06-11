@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import os
 import time
 import uuid
@@ -9,9 +11,9 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator
 
+import bcrypt
 from fastapi import Cookie, Depends, Header, Request
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
@@ -43,18 +45,50 @@ REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 # ---------------------------------------------------------------------------
 # Password hashing  (bcrypt, cost 12)
 # ---------------------------------------------------------------------------
+#
+# We use the ``bcrypt`` library directly rather than passlib: passlib 1.7.4 is
+# the last (effectively unmaintained) release and reads ``bcrypt.__about__``,
+# which bcrypt >= 4.1 removed, tripping a backend self-test and raising on every
+# hash/verify call.
+#
+# bcrypt itself only considers the first 72 bytes of the input and raises on
+# anything longer. To support passwords of any length *without* silently
+# truncating (which would weaken long passwords), we pre-hash the UTF-8 password
+# with SHA-256 and base64-encode the digest before handing it to bcrypt. The
+# base64 of a 32-byte digest is 44 ASCII bytes -- comfortably under the 72-byte
+# limit -- and preserves the full entropy of the original password.
+#
+# Stored hashes remain standard bcrypt ``$2b$`` strings, verifiable by
+# ``bcrypt.checkpw``; since the same pre-hash is applied on both hash and verify
+# this scheme is self-consistent.
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
+_BCRYPT_ROUNDS = 12
+
+
+def _prehash(plain: str) -> bytes:
+    """SHA-256 + base64 the password so bcrypt never sees more than 72 bytes.
+
+    Returns a 44-byte ASCII token regardless of input length, sidestepping
+    bcrypt's 72-byte limit while preserving the password's full entropy.
+    """
+    digest = hashlib.sha256(plain.encode("utf-8")).digest()
+    return base64.b64encode(digest)
 
 
 def hash_password(plain: str) -> str:
-    """Return a bcrypt hash of *plain*."""
-    return pwd_context.hash(plain)
+    """Return a bcrypt hash (cost 12) of *plain*."""
+    return bcrypt.hashpw(_prehash(plain), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode("ascii")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """Return ``True`` if *plain* matches *hashed*."""
-    return pwd_context.verify(plain, hashed)
+    """Return ``True`` if *plain* matches *hashed*.
+
+    Returns ``False`` (rather than raising) for malformed/invalid stored hashes.
+    """
+    try:
+        return bcrypt.checkpw(_prehash(plain), hashed.encode("ascii"))
+    except (ValueError, TypeError):
+        return False
 
 
 # ---------------------------------------------------------------------------
