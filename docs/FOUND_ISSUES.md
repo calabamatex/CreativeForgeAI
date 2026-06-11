@@ -120,3 +120,17 @@ tests/integration -q` → 117 passed. Files: `src/pipeline.py`, `src/storage.py`
 Deferred (expected under option (a)): report & brief JSON are still written by
 `StorageManager` to local disk — that is by design (reports/briefs, NOT assets),
 and the intermediate hero-image cache likewise stays local.
+
+### WebSocket `/ws/generation/{job_id}` has no authentication — DEFERRED to P4
+`src/api/routes/ws.py` accepts any connection for a given `job_id` and streams that
+job's progress with no auth check (matches the prior heartbeat implementation,
+which also had none). A client who knows/guesses a job UUID can observe its
+progress. Out of scope for P3-T4 (real progress streaming); belongs to P4 security
+hardening (auth the WS handshake + authorize the job's owner). `src/api/routes/ws.py`.
+
+### P3-T4 WebSocket test is timing-flaky — DEFERRED to P6
+`tests/integration/test_api_ws.py::test_ws_streams_real_progress_then_closes_on_terminal`
+drives job-state changes against a 0.5s poll loop from the same event loop; it
+occasionally flakes on timing (passes in isolation and on rerun). Not a product
+bug — a test-reliability issue (drive the poll deterministically rather than racing
+wall-clock). Belongs to the P6 test-taxonomy work. `tests/integration/test_api_ws.py`.
