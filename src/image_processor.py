@@ -364,7 +364,12 @@ class ImageProcessorV2:
         if cache_key in self.font_cache:
             return self.font_cache[cache_key]
 
-        # Font paths by weight
+        # Font paths by weight.
+        # Each list includes Linux/DejaVu (bundled via the Docker image's
+        # ``fonts-dejavu-core`` package) so a real TrueType font with the
+        # requested weight resolves in the container; macOS/Windows paths are
+        # kept for local development. Bold/black weights map to real bold faces
+        # (DejaVuSans-Bold.ttf) where available.
         font_paths = {
             "regular": [
                 "/System/Library/Fonts/Helvetica.ttc",
@@ -374,15 +379,19 @@ class ImageProcessorV2:
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             ],
             "bold": [
-                "/System/Library/Fonts/Helvetica.ttc",
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
                 "/Library/Fonts/Arial Bold.ttf",
                 "C:/Windows/Fonts/arialbd.ttf",
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                # macOS Helvetica.ttc (index 1 is Bold) as a last styled resort
+                "/System/Library/Fonts/Helvetica.ttc",
             ],
             "black": [
                 "/Library/Fonts/Arial Black.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Black.ttf",
                 "C:/Windows/Fonts/ariblk.ttf",
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/System/Library/Fonts/Helvetica.ttc",
             ]
         }
 
@@ -396,13 +405,30 @@ class ImageProcessorV2:
             except (IOError, OSError):
                 continue
 
-        # Fallback
+        # Last-resort name-based lookup (resolved via the platform font config).
         try:
             font = ImageFont.truetype("Arial", size)
             self.font_cache[cache_key] = font
             return font
         except (IOError, OSError):
-            return ImageFont.load_default()
+            pass
+
+        # No real TrueType font could be resolved. Falling back to PIL's bitmap
+        # default silently degrades typography (no weight support), so surface
+        # it loudly instead of failing quietly in production.
+        logger.warning(
+            "font_load_fallback_to_bitmap_default",
+            weight=weight,
+            size=size,
+            candidate_paths=paths,
+            message=(
+                "No TrueType font found for the requested weight; falling back "
+                "to PIL's bitmap default font. Typography/font_weight will be "
+                "unstyled. On Linux ensure the 'fonts-dejavu-core' package is "
+                "installed (see Dockerfile)."
+            ),
+        )
+        return ImageFont.load_default()
 
     def apply_logo_overlay(
         self,
