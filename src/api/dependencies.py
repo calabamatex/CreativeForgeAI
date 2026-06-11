@@ -140,6 +140,46 @@ def decode_token(token: str) -> dict:
         raise AuthenticationError("Invalid or expired token") from exc
 
 
+def token_remaining_seconds(payload: dict) -> int:
+    """Return how many seconds remain until *payload*'s ``exp``.
+
+    Used to size a denylist entry's TTL so it auto-expires exactly when the
+    token would have expired anyway (no unbounded denylist growth). Clamped to
+    a minimum of 1s; returns a small default if ``exp`` is somehow absent.
+    """
+    exp = payload.get("exp")
+    if exp is None:
+        return 60
+    now = datetime.now(timezone.utc).timestamp()
+    return max(1, int(exp - now))
+
+
+async def assert_not_revoked(payload: dict) -> None:
+    """Reject a token whose ``jti`` is on the revocation denylist.
+
+    Fail-CLOSED policy: if Redis is unreachable we raise ``AuthenticationError``
+    rather than letting a possibly-revoked token through. Revocation is a
+    security control, so an outage must not silently re-enable logged-out /
+    rotated-away tokens. (The alternative — fail-open — would mean a Redis blip
+    quietly disables logout for the duration of the outage, which is worse for a
+    security primitive than briefly rejecting otherwise-valid tokens.)
+    """
+    jti = payload.get("jti")
+    if not jti:
+        # A token with no jti can never be individually revoked; treat as invalid.
+        raise AuthenticationError("Token missing jti claim")
+    from src.cache import CacheUnavailable, get_cache  # lazy import
+
+    try:
+        revoked = await get_cache().is_denylisted(jti)
+    except CacheUnavailable as exc:
+        logger.error("auth.revocation_check_unavailable", error=str(exc))
+        raise AuthenticationError("Token revocation status unavailable") from exc
+    if revoked:
+        logger.info("auth.token_revoked", jti=jti)
+        raise AuthenticationError("Token has been revoked")
+
+
 # ---------------------------------------------------------------------------
 # Database session dependency
 # ---------------------------------------------------------------------------
@@ -208,10 +248,27 @@ async def get_current_user(
     if not token:
         raise AuthenticationError("Missing authentication token")
 
+    user = await resolve_access_token_user(token, db)
+
+    # Stash on request.state for downstream access (e.g. logging middleware)
+    request.state.user = user
+    return user
+
+
+async def resolve_access_token_user(token: str, db: AsyncSession):
+    """Decode an ACCESS token, enforce revocation, and load the active User.
+
+    Shared by ``get_current_user`` (HTTP) and the WebSocket handshake so both
+    transports apply the identical decode + denylist + active-user checks.
+    Raises ``AuthenticationError`` on any failure.
+    """
     payload = decode_token(token)
 
     if payload.get("type") != "access":
         raise AuthenticationError("Token is not an access token")
+
+    # Reject revoked (logged-out) tokens before doing any DB work.
+    await assert_not_revoked(payload)
 
     user_id = payload.get("sub")
     if not user_id:
@@ -230,8 +287,6 @@ async def get_current_user(
     if not user.is_active:
         raise AuthenticationError("User account is deactivated")
 
-    # Stash on request.state for downstream access (e.g. logging middleware)
-    request.state.user = user
     return user
 
 

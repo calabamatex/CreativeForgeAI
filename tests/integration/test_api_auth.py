@@ -276,6 +276,46 @@ class TestRefresh:
 
         assert resp.status_code == 401
 
+    async def test_refresh_rotation_invalidates_old_token(self, client, mock_db):
+        """Refresh ROTATES: the presented refresh token is consumed (single-use).
+
+        First refresh succeeds and returns a NEW pair. Replaying the OLD refresh
+        token is rejected (401) and flagged as reuse; the NEW refresh token still
+        works. Exercises the real Redis denylist (the consumed jti is stored).
+        """
+        from src.cache import get_cache
+        from jose import jwt as _jwt
+
+        user = _make_user(user_id=USER_EDITOR_ID, email="rotate@example.com", role="editor")
+        mock_db.execute = AsyncMock(return_value=FakeScalarResult(user))
+
+        old_refresh = make_refresh_token(USER_EDITOR_ID)
+        old_jti = _jwt.get_unverified_claims(old_refresh)["jti"]
+
+        # 1) First refresh works and rotates.
+        first = await client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": old_refresh}
+        )
+        assert first.status_code == 200
+        new_refresh = first.json()["data"]["refresh_token"]
+        assert new_refresh != old_refresh
+
+        # 2) A REAL denylist entry exists for the consumed (old) refresh jti.
+        assert await get_cache().is_denylisted(old_jti) is True
+
+        # 3) Replaying the OLD refresh token is rejected (reuse detection).
+        replay = await client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": old_refresh}
+        )
+        assert replay.status_code == 401
+        assert "already been used" in replay.json()["detail"].lower()
+
+        # 4) The NEW refresh token still works.
+        second = await client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": new_refresh}
+        )
+        assert second.status_code == 200
+
 
 # ===================================================================
 # GET /api/v1/auth/me
@@ -313,3 +353,44 @@ class TestMe:
         )
 
         assert resp.status_code == 401
+
+
+# ===================================================================
+# Revocation (jti denylist) — logout invalidates the access token
+# ===================================================================
+
+
+class TestRevocation:
+    """A logged-out access token must be rejected for its remaining lifetime."""
+
+    async def test_logout_revokes_access_token(self, client, mock_db, admin_user):
+        """After /auth/logout the SAME bearer token is rejected by /auth/me.
+
+        Exercises the real Redis denylist: logout denylists the token's jti and
+        the subsequent /auth/me consults the denylist (fail-closed) and 401s.
+        """
+        from src.api.dependencies import create_access_token
+        from src.cache import get_cache
+        from jose import jwt as _jwt
+
+        mock_db.execute = AsyncMock(return_value=FakeScalarResult(admin_user))
+
+        token = create_access_token(str(USER_ADMIN_ID), "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 1) Token works before logout.
+        ok = await client.get("/api/v1/auth/me", headers=headers)
+        assert ok.status_code == 200
+
+        # 2) Logout revokes it.
+        out = await client.post("/api/v1/auth/logout", headers=headers)
+        assert out.status_code == 204
+
+        # 3) A REAL denylist entry now exists for this token's jti.
+        jti = _jwt.get_unverified_claims(token)["jti"]
+        assert await get_cache().is_denylisted(jti) is True
+
+        # 4) The same token is now rejected.
+        denied = await client.get("/api/v1/auth/me", headers=headers)
+        assert denied.status_code == 401
+        assert "revoked" in denied.json()["detail"].lower()

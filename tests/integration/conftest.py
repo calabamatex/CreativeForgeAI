@@ -177,6 +177,35 @@ def _make_job(
 
 
 # ---------------------------------------------------------------------------
+# Real Redis for the JWT revocation denylist  (P4-T1)
+# ---------------------------------------------------------------------------
+#
+# The revocation check (``assert_not_revoked``) fails CLOSED when Redis is
+# unreachable, so the integration suite must connect the module-level cache
+# singleton to the Compose Redis once per session. Without this every protected
+# endpoint would 401 ("revocation status unavailable"). This genuinely exercises
+# the real denylist (no no-op cache); the revoke/rotation tests assert real
+# denylist entries against this same connection.
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _connect_revocation_cache():
+    """Connect the cache singleton to real Redis for the CURRENT test's loop.
+
+    pytest-asyncio runs each test on a fresh function-scoped event loop, and the
+    redis.asyncio client binds to the loop it was created on. So we (re)connect
+    per test — creating a client on this test's loop — and close it at teardown,
+    avoiding "Event loop is closed" errors from a stale cross-test connection.
+    """
+    from src.cache import get_cache
+
+    cache = get_cache()
+    await cache.connect()
+    yield
+    await cache.close()
+
+
+# ---------------------------------------------------------------------------
 # Public fixtures: sample data
 # ---------------------------------------------------------------------------
 

@@ -5,12 +5,13 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Cookie, Depends, Header, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
 from src.api.dependencies import (
+    assert_not_revoked,
     check_rate_limit,
     create_access_token,
     create_refresh_token,
@@ -18,9 +19,11 @@ from src.api.dependencies import (
     get_current_user,
     get_db,
     hash_password,
+    token_remaining_seconds,
     verify_password,
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
+from src.cache import CacheUnavailable, get_cache
 from src.api.errors import (
     AuthenticationError,
     ConflictError,
@@ -165,6 +168,26 @@ async def refresh_token(
     if payload.get("type") != "refresh":
         raise AuthenticationError("Token is not a refresh token")
 
+    # Refresh-token ROTATION: the presented refresh token is single-use. If its
+    # jti is already on the denylist it has been consumed before — reject and
+    # flag, since reuse of a rotated-away refresh token can indicate token
+    # theft (the legitimate client and an attacker both holding the same token).
+    old_jti = payload.get("jti")
+    if not old_jti:
+        raise AuthenticationError("Token missing jti claim")
+    try:
+        if await get_cache().is_denylisted(old_jti):
+            logger.warning(
+                "auth.refresh_reuse_detected",
+                jti=old_jti,
+                user_id=payload.get("sub"),
+            )
+            raise AuthenticationError("Refresh token has already been used")
+    except CacheUnavailable as exc:
+        # Fail CLOSED: we cannot prove the token has not already been consumed.
+        logger.error("auth.refresh_revocation_unavailable", error=str(exc))
+        raise AuthenticationError("Token revocation status unavailable") from exc
+
     user_id = payload.get("sub")
     if not user_id:
         raise AuthenticationError("Token missing subject claim")
@@ -176,6 +199,15 @@ async def refresh_token(
         raise AuthenticationError("User not found")
     if not user.is_active:
         raise AuthenticationError("Account is deactivated")
+
+    # Consume the presented refresh token: denylist its jti for its remaining
+    # lifetime so it can never be exchanged again (rotation). TTL = remaining
+    # life keeps the denylist bounded.
+    try:
+        await get_cache().denylist_jti(old_jti, token_remaining_seconds(payload))
+    except CacheUnavailable as exc:
+        logger.error("auth.refresh_rotation_failed", error=str(exc))
+        raise AuthenticationError("Token revocation status unavailable") from exc
 
     access = create_access_token(str(user.id), user.role)
     refresh = create_refresh_token(str(user.id))
@@ -208,8 +240,18 @@ async def refresh_token(
 
 
 @router.post("/logout", status_code=204)
-async def logout(response: Response):
-    """Clear the access-token cookie."""
+async def logout(
+    response: Response,
+    authorization: str | None = Header(None),
+    access_token: str | None = Cookie(None),
+):
+    """Revoke the current access token and clear the cookie.
+
+    Server-side revocation (jti denylist) means a bearer token presented after
+    logout is rejected for its remaining lifetime, instead of staying valid
+    until it naturally expires. The denylist TTL equals the token's remaining
+    life so the entry self-expires (no unbounded growth).
+    """
     response.delete_cookie(
         key="access_token",
         httponly=True,
@@ -217,7 +259,36 @@ async def logout(response: Response):
         samesite="lax",
         path="/",
     )
-    logger.info("auth.logout")
+
+    # Resolve the presented token (header preferred, else cookie) and revoke it.
+    token: str | None = None
+    if authorization:
+        scheme, _, param = authorization.partition(" ")
+        if scheme.lower() == "bearer" and param:
+            token = param
+    if token is None and access_token:
+        token = access_token
+
+    if token:
+        try:
+            payload = decode_token(token)
+            jti = payload.get("jti")
+            if jti:
+                await get_cache().denylist_jti(jti, token_remaining_seconds(payload))
+                logger.info("auth.logout", jti=jti, revoked=True)
+                return
+        except CacheUnavailable as exc:
+            # Cookie is cleared; surface the failure so the caller knows the
+            # bearer token was NOT server-side revoked (it remains valid until
+            # natural expiry). Fail-closed on the revocation guarantee.
+            logger.error("auth.logout_revocation_failed", error=str(exc))
+            raise AuthenticationError("Logout incomplete: revocation unavailable") from exc
+        except AuthenticationError:
+            # Already-invalid/expired token: nothing to revoke; cookie cleared.
+            logger.info("auth.logout", revoked=False, reason="invalid_token")
+            return
+
+    logger.info("auth.logout", revoked=False)
 
 
 # ---------------------------------------------------------------------------
