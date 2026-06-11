@@ -38,14 +38,12 @@ Cost gating:
 
 See ``docs/FOUND_ISSUES.md`` and the README testing notes for the full policy.
 """
+
 import importlib
 import os
-import pytest
-from datetime import datetime
 from pathlib import Path
-import json
-import yaml
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Tier auto-tagging + paid cost-gating  (P6-T1)
@@ -74,12 +72,8 @@ def pytest_collection_modifyitems(config, items):
     run_paid = os.getenv("RUN_PAID_TESTS") == "1"
     run_matrix = os.getenv("RUN_FULL_MATRIX") == "1"
 
-    skip_paid = pytest.mark.skip(
-        reason="paid test — set RUN_PAID_TESTS=1 to run"
-    )
-    skip_matrix = pytest.mark.skip(
-        reason="full paid matrix — set RUN_PAID_TESTS=1 and RUN_FULL_MATRIX=1 to run"
-    )
+    skip_paid = pytest.mark.skip(reason="paid test — set RUN_PAID_TESTS=1 to run")
+    skip_matrix = pytest.mark.skip(reason="full paid matrix — set RUN_PAID_TESTS=1 and RUN_FULL_MATRIX=1 to run")
 
     for item in items:
         own_markers = {m.name for m in item.iter_markers()}
@@ -194,19 +188,14 @@ def example_product():
         "product_description": "A test product for unit testing",
         "product_category": "Electronics",
         "key_features": ["Feature 1", "Feature 2", "Feature 3"],
-        "generation_prompt": "professional product photo of test product"
+        "generation_prompt": "professional product photo of test product",
     }
 
 
 @pytest.fixture
 def example_campaign_message():
     """Example campaign message for testing."""
-    return {
-        "locale": "en-US",
-        "headline": "Test Headline",
-        "subheadline": "Test Subheadline",
-        "cta": "Test CTA"
-    }
+    return {"locale": "en-US", "headline": "Test Headline", "subheadline": "Test Subheadline", "cta": "Test CTA"}
 
 
 @pytest.fixture
@@ -224,47 +213,34 @@ def example_brief(example_product, example_campaign_message):
         "output_formats": ["png"],
         "image_generation_backend": "firefly",
         "enable_localization": True,
-        "target_locales": ["en-US", "es-MX"]
+        "target_locales": ["en-US", "es-MX"],
     }
 
 
 @pytest.fixture
 def mock_image_bytes():
     """Mock image bytes for testing."""
-    from PIL import Image
     from io import BytesIO
 
+    from PIL import Image
+
     # Create a valid test image
-    img = Image.new('RGB', (1024, 1024), color='blue')
+    img = Image.new("RGB", (1024, 1024), color="blue")
     buf = BytesIO()
-    img.save(buf, format='PNG')
+    img.save(buf, format="PNG")
     return buf.getvalue()
 
 
 @pytest.fixture
 def mock_firefly_response():
     """Mock Adobe Firefly API response."""
-    return {
-        "outputs": [
-            {
-                "image": {
-                    "url": "https://example.com/generated-image.jpg"
-                }
-            }
-        ]
-    }
+    return {"outputs": [{"image": {"url": "https://example.com/generated-image.jpg"}}]}
 
 
 @pytest.fixture
 def mock_openai_response():
     """Mock OpenAI DALL-E API response."""
-    return {
-        "data": [
-            {
-                "url": "https://example.com/dalle-image.png"
-            }
-        ]
-    }
+    return {"data": [{"url": "https://example.com/dalle-image.png"}]}
 
 
 @pytest.fixture
@@ -286,18 +262,10 @@ def mock_claude_response():
         "id": "msg_123",
         "type": "message",
         "role": "assistant",
-        "content": [
-            {
-                "type": "text",
-                "text": '{"result": "test response"}'
-            }
-        ],
+        "content": [{"type": "text", "text": '{"result": "test response"}'}],
         "model": "claude-sonnet-4-20250514",
         "stop_reason": "end_turn",
-        "usage": {
-            "input_tokens": 100,
-            "output_tokens": 50
-        }
+        "usage": {"input_tokens": 100, "output_tokens": 50},
     }
 
 
@@ -406,7 +374,7 @@ def brand_guidelines_model():
         logo_clearspace=20,
         logo_min_size=50,
         prohibited_uses=["No dark backgrounds", "No cluttered compositions"],
-        approved_taglines=["Innovation at Your Fingertips"]
+        approved_taglines=["Innovation at Your Fingertips"],
     )
 
 
@@ -421,16 +389,10 @@ def localization_guidelines_model():
         market_specific_rules={
             "en-US": {"tone": "casual", "formality": "informal"},
             "es-MX": {"tone": "warm", "formality": "formal"},
-            "fr-CA": {"tone": "professional", "formality": "formal"}
+            "fr-CA": {"tone": "professional", "formality": "formal"},
         },
-        prohibited_terms={
-            "en-US": ["cheap", "discount"],
-            "es-MX": ["barato", "oferta"]
-        },
-        translation_glossary={
-            "en-US": {"product": "product"},
-            "es-MX": {"product": "producto"}
-        }
+        prohibited_terms={"en-US": ["cheap", "discount"], "es-MX": ["barato", "oferta"]},
+        translation_glossary={"en-US": {"product": "product"}, "es-MX": {"product": "producto"}},
     )
 
 

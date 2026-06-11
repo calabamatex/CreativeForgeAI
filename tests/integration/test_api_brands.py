@@ -5,21 +5,14 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock
 
-import pytest
-
 from tests.integration.conftest import (
     BRAND_ID,
-    USER_ADMIN_ID,
-    USER_EDITOR_ID,
-    USER_VIEWER_ID,
     FakeScalarResult,
     _make_brand,
-    _make_user,
     admin_headers,
     editor_headers,
     viewer_headers,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

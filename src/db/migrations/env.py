@@ -40,8 +40,7 @@ target_metadata = Base.metadata
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError(
-        "DATABASE_URL environment variable is not set. "
-        "Alembic migrations require an explicit database URL."
+        "DATABASE_URL environment variable is not set. Alembic migrations require an explicit database URL."
     )
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 

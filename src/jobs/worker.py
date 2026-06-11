@@ -6,7 +6,6 @@ from arq.connections import RedisSettings
 
 from src.jobs.tasks import process_campaign_job
 
-
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
 

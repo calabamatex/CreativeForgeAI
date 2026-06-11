@@ -6,11 +6,11 @@ import math
 import os
 import uuid
 
+import structlog
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.api.dependencies import check_rate_limit, get_current_user, get_db
 from src.api.errors import NotFoundError
@@ -80,11 +80,7 @@ async def list_campaign_assets(
     await _campaign_exists(campaign_id, db)
 
     base = select(GeneratedAsset).where(GeneratedAsset.campaign_id == campaign_id)
-    count_q = (
-        select(func.count())
-        .select_from(GeneratedAsset)
-        .where(GeneratedAsset.campaign_id == campaign_id)
-    )
+    count_q = select(func.count()).select_from(GeneratedAsset).where(GeneratedAsset.campaign_id == campaign_id)
 
     if locale:
         base = base.where(GeneratedAsset.locale == locale)
@@ -99,11 +95,7 @@ async def list_campaign_assets(
     total = (await db.execute(count_q)).scalar_one()
     total_pages = max(1, math.ceil(total / per_page))
 
-    stmt = (
-        base.order_by(GeneratedAsset.created_at.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-    )
+    stmt = base.order_by(GeneratedAsset.created_at.desc()).offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(stmt)
     assets = result.scalars().all()
 
@@ -188,13 +180,13 @@ async def download_asset(
     if not isinstance(backend, LocalStorageBackend):
         try:
             url = await backend.get_url(storage_key)
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "asset.download.presign_failed",
                 asset_id=str(asset_id),
                 key=storage_key,
             )
-            raise NotFoundError("Asset file", str(asset_id))
+            raise NotFoundError("Asset file", str(asset_id)) from exc
 
         logger.info(
             "asset.download.redirect",
@@ -208,13 +200,13 @@ async def download_asset(
     # (``is_relative_to`` in ``LocalStorageBackend._resolve_path``) is honored.
     try:
         resolved = backend._resolve_path(storage_key)
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "asset.download.resolve_failed",
             asset_id=str(asset_id),
             key=storage_key,
         )
-        raise NotFoundError("Asset file", str(asset_id))
+        raise NotFoundError("Asset file", str(asset_id)) from exc
 
     file_path = str(resolved)
     if not resolved.is_file():

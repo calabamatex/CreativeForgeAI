@@ -1,11 +1,13 @@
 """Claude API service for guideline extraction and localization."""
-import aiohttp
-import json
+
 import asyncio
-from typing import Dict, Any, Optional
+import json
+
+import aiohttp
 import structlog
+
 from src.config import get_config
-from src.models import ComprehensiveBrandGuidelines, LocalizationGuidelines, CampaignMessage
+from src.models import CampaignMessage, ComprehensiveBrandGuidelines, LocalizationGuidelines
 from src.security import sanitize_prompt
 
 logger = structlog.get_logger(__name__)
@@ -14,7 +16,7 @@ logger = structlog.get_logger(__name__)
 class ClaudeService:
     """Service for interacting with Anthropic Claude API."""
 
-    def __init__(self, api_key: Optional[str] = None, max_retries: int = 3):
+    def __init__(self, api_key: str | None = None, max_retries: int = 3):
         config = get_config()
         self.api_key = api_key or config.CLAUDE_API_KEY
 
@@ -27,7 +29,7 @@ class ClaudeService:
         self.api_url = config.CLAUDE_API_URL
         self.max_retries = max_retries
         self.model = "claude-sonnet-4-20250514"
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -52,12 +54,8 @@ class ClaudeService:
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
-    
-    async def extract_brand_guidelines(
-        self,
-        text_content: str,
-        source_file: str
-    ) -> ComprehensiveBrandGuidelines:
+
+    async def extract_brand_guidelines(self, text_content: str, source_file: str) -> ComprehensiveBrandGuidelines:
         """Extract brand guidelines from document text using Claude."""
         prompt = f"""Extract brand guidelines from the following document and return as JSON:
 
@@ -78,29 +76,25 @@ Extract and return JSON with these fields:
 - approved_taglines: list of strings
 
 Return ONLY valid JSON, no additional text."""
-        
+
         response_text = await self._call_claude(prompt)
-        
+
         try:
             # Parse JSON response
             data = json.loads(response_text)
-            data['source_file'] = source_file
+            data["source_file"] = source_file
             return ComprehensiveBrandGuidelines(**data)
-        except (json.JSONDecodeError, ValueError) as e:
+        except (json.JSONDecodeError, ValueError):
             # Fallback with defaults
             return ComprehensiveBrandGuidelines(
                 source_file=source_file,
                 primary_colors=["#000000"],
                 primary_font="Arial",
                 brand_voice="Professional",
-                photography_style="Modern"
+                photography_style="Modern",
             )
-    
-    async def extract_localization_guidelines(
-        self,
-        text_content: str,
-        source_file: str
-    ) -> LocalizationGuidelines:
+
+    async def extract_localization_guidelines(self, text_content: str, source_file: str) -> LocalizationGuidelines:
         """Extract localization guidelines from document text."""
         prompt = f"""Extract localization guidelines from the following document and return as JSON:
 
@@ -116,12 +110,12 @@ Extract and return JSON with these fields:
 - cultural_considerations: dict with locale keys containing cultural notes
 
 Return ONLY valid JSON."""
-        
+
         response_text = await self._call_claude(prompt)
-        
+
         try:
             data = json.loads(response_text)
-            data['source_file'] = source_file
+            data["source_file"] = source_file
             return LocalizationGuidelines(**data)
         except (json.JSONDecodeError, ValueError):
             return LocalizationGuidelines(
@@ -129,14 +123,14 @@ Return ONLY valid JSON."""
                 supported_locales=["en-US"],
                 market_specific_rules={},
                 prohibited_terms={},
-                translation_glossary={}
+                translation_glossary={},
             )
-    
+
     async def localize_message(
         self,
         original_message: CampaignMessage,
         target_locale: str,
-        localization_guidelines: Optional[LocalizationGuidelines] = None
+        localization_guidelines: LocalizationGuidelines | None = None,
     ) -> CampaignMessage:
         """Generate localized campaign message for target locale."""
 
@@ -170,33 +164,35 @@ Make it culturally appropriate and engaging for {target_locale} market."""
 
         try:
             # Try to extract JSON from response (Claude might wrap it in markdown)
-            if '```json' in response_text:
+            if "```json" in response_text:
                 # Extract JSON from markdown code block
-                start = response_text.find('```json') + 7
-                end = response_text.find('```', start)
+                start = response_text.find("```json") + 7
+                end = response_text.find("```", start)
                 response_text = response_text[start:end].strip()
-            elif '```' in response_text:
+            elif "```" in response_text:
                 # Generic code block
-                start = response_text.find('```') + 3
-                end = response_text.find('```', start)
+                start = response_text.find("```") + 3
+                end = response_text.find("```", start)
                 response_text = response_text[start:end].strip()
 
             data = json.loads(response_text)
             return CampaignMessage(
                 locale=target_locale,
-                headline=data.get('headline', original_message.headline),
-                subheadline=data.get('subheadline', original_message.subheadline),
-                cta=data.get('cta', original_message.cta)
+                headline=data.get("headline", original_message.headline),
+                subheadline=data.get("subheadline", original_message.subheadline),
+                cta=data.get("cta", original_message.cta),
             )
         except (json.JSONDecodeError, ValueError) as e:
-            logger.warning("claude.localization_failed", locale=target_locale, error=str(e), response_preview=response_text[:200])
+            logger.warning(
+                "claude.localization_failed", locale=target_locale, error=str(e), response_preview=response_text[:200]
+            )
             return CampaignMessage(
                 locale=target_locale,
                 headline=original_message.headline,
                 subheadline=original_message.subheadline,
-                cta=original_message.cta
+                cta=original_message.cta,
             )
-    
+
     async def _call_claude(self, prompt: str) -> str:
         """Make API call to Claude with retry logic.
 
@@ -204,18 +200,10 @@ Make it culturally appropriate and engaging for {target_locale} market."""
         before being sent to the API.
         """
         prompt = sanitize_prompt(prompt, max_length=16_000)  # Claude can handle longer context
-        headers = {
-            "x-api-key": self.api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
-        
-        payload = {
-            "model": self.model,
-            "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}]
-        }
-        
+        headers = {"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+
+        payload = {"model": self.model, "max_tokens": 4096, "messages": [{"role": "user", "content": prompt}]}
+
         for attempt in range(self.max_retries):
             try:
                 session = await self._get_session()
@@ -230,21 +218,21 @@ Make it culturally appropriate and engaging for {target_locale} market."""
                         try:
                             return data["content"][0]["text"]
                         except (KeyError, IndexError, TypeError) as e:
-                            raise ValueError(f"Unexpected Claude API response format: {e}")
+                            raise ValueError(f"Unexpected Claude API response format: {e}") from e
                     elif response.status == 429:
-                        await asyncio.sleep(2 ** attempt)
+                        await asyncio.sleep(2**attempt)
                         continue
                     else:
                         error_text = await response.text()
                         logger.warning("claude.api_error", status=response.status, error=error_text)
                         if attempt < self.max_retries - 1:
-                            await asyncio.sleep(2 ** attempt)
+                            await asyncio.sleep(2**attempt)
                             continue
                         raise Exception(f"Claude API error: {response.status}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
                     continue
                 raise
-        
+
         raise Exception("Max retries exceeded for Claude API")

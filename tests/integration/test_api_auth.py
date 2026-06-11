@@ -3,27 +3,21 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
-import pytest
 from jose import jwt
+from src.api.dependencies import SECRET_KEY
 
 from tests.integration.conftest import (
     ALGORITHM,
-    FakeScalarResult,
-    NOW,
     USER_ADMIN_ID,
     USER_EDITOR_ID,
+    FakeScalarResult,
     _make_user,
     admin_headers,
-    auth_header,
-    editor_headers,
     make_refresh_token,
-    viewer_headers,
 )
-from src.api.dependencies import SECRET_KEY
-
 
 # ---------------------------------------------------------------------------
 # Helper: patch password hashing so we avoid bcrypt version issues in CI
@@ -233,7 +227,7 @@ class TestRefresh:
 
     async def test_refresh_expired_token(self, client, mock_db):
         """An expired refresh token returns 401."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         claims = {
             "sub": str(USER_EDITOR_ID),
             "type": "refresh",
@@ -283,8 +277,8 @@ class TestRefresh:
         token is rejected (401) and flagged as reuse; the NEW refresh token still
         works. Exercises the real Redis denylist (the consumed jti is stored).
         """
-        from src.cache import get_cache
         from jose import jwt as _jwt
+        from src.cache import get_cache
 
         user = _make_user(user_id=USER_EDITOR_ID, email="rotate@example.com", role="editor")
         mock_db.execute = AsyncMock(return_value=FakeScalarResult(user))
@@ -293,9 +287,7 @@ class TestRefresh:
         old_jti = _jwt.get_unverified_claims(old_refresh)["jti"]
 
         # 1) First refresh works and rotates.
-        first = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": old_refresh}
-        )
+        first = await client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
         assert first.status_code == 200
         new_refresh = first.json()["data"]["refresh_token"]
         assert new_refresh != old_refresh
@@ -304,16 +296,12 @@ class TestRefresh:
         assert await get_cache().is_denylisted(old_jti) is True
 
         # 3) Replaying the OLD refresh token is rejected (reuse detection).
-        replay = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": old_refresh}
-        )
+        replay = await client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
         assert replay.status_code == 401
         assert "already been used" in replay.json()["detail"].lower()
 
         # 4) The NEW refresh token still works.
-        second = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": new_refresh}
-        )
+        second = await client.post("/api/v1/auth/refresh", json={"refresh_token": new_refresh})
         assert second.status_code == 200
 
 
@@ -369,9 +357,9 @@ class TestRevocation:
         Exercises the real Redis denylist: logout denylists the token's jti and
         the subsequent /auth/me consults the denylist (fail-closed) and 401s.
         """
+        from jose import jwt as _jwt
         from src.api.dependencies import create_access_token
         from src.cache import get_cache
-        from jose import jwt as _jwt
 
         mock_db.execute = AsyncMock(return_value=FakeScalarResult(admin_user))
 

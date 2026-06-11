@@ -1,8 +1,8 @@
 """Tests for LegalComplianceChecker logic."""
-import pytest
 
-from src.legal_checker import LegalComplianceChecker, ComplianceViolation
-from src.models import LegalComplianceGuidelines, CampaignMessage
+import pytest
+from src.legal_checker import LegalComplianceChecker
+from src.models import CampaignMessage, LegalComplianceGuidelines
 
 
 @pytest.fixture
@@ -230,9 +230,7 @@ class TestProductContent:
             "features": ["Clinically proven effectiveness"],
         }
         checker = LegalComplianceChecker(basic_guidelines)
-        is_compliant, violations = checker.check_content(
-            msg, product_content=product_content
-        )
+        is_compliant, violations = checker.check_content(msg, product_content=product_content)
 
         assert is_compliant is False
         fields = {v.field for v in violations if v.severity == "error"}
@@ -269,9 +267,7 @@ class TestReport:
 
     def test_no_violations_report(self):
         guidelines = LegalComplianceGuidelines(source_file="test.yaml")
-        msg = CampaignMessage(
-            headline="Hello", subheadline="World", cta="Click", locale="en-US"
-        )
+        msg = CampaignMessage(headline="Hello", subheadline="World", cta="Click", locale="en-US")
         checker = LegalComplianceChecker(guidelines)
         checker.check_content(msg)
         report = checker.generate_report()
@@ -303,9 +299,7 @@ class TestViolationSummary:
 
     def test_empty_summary(self):
         guidelines = LegalComplianceGuidelines(source_file="test.yaml")
-        msg = CampaignMessage(
-            headline="Hello", subheadline="World", cta="Click", locale="en-US"
-        )
+        msg = CampaignMessage(headline="Hello", subheadline="World", cta="Click", locale="en-US")
         checker = LegalComplianceChecker(guidelines)
         checker.check_content(msg)
         summary = checker.get_violation_summary()

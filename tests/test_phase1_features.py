@@ -1,17 +1,18 @@
 """Unit tests for Phase 1 features: per-element text control and post-processing."""
+
 import pytest
 from PIL import Image
+from src.image_processor import ImageProcessorV2
 from src.models import (
-    TextElementStyle,
-    TextShadow,
-    TextOutline,
+    CampaignMessage,
+    ComprehensiveBrandGuidelines,
+    PostProcessingConfig,
     TextBackgroundBox,
     TextCustomization,
-    PostProcessingConfig,
-    ComprehensiveBrandGuidelines,
-    CampaignMessage
+    TextElementStyle,
+    TextOutline,
+    TextShadow,
 )
-from src.image_processor import ImageProcessorV2
 
 
 class TestTextElementStyle:
@@ -74,19 +75,9 @@ class TestTextCustomization:
     def test_per_element_customization(self):
         """Test independent per-element styling."""
         customization = TextCustomization(
-            headline=TextElementStyle(
-                color="#FFFFFF",
-                font_weight="bold",
-                shadow=TextShadow(enabled=True)
-            ),
-            subheadline=TextElementStyle(
-                color="#CCCCCC",
-                shadow=TextShadow(enabled=False)
-            ),
-            cta=TextElementStyle(
-                color="#FF6600",
-                outline=TextOutline(enabled=True, color="#FFFFFF", width=2)
-            )
+            headline=TextElementStyle(color="#FFFFFF", font_weight="bold", shadow=TextShadow(enabled=True)),
+            subheadline=TextElementStyle(color="#CCCCCC", shadow=TextShadow(enabled=False)),
+            cta=TextElementStyle(color="#FF6600", outline=TextOutline(enabled=True, color="#FFFFFF", width=2)),
         )
 
         # Verify headline has shadow
@@ -118,7 +109,7 @@ class TestPostProcessingConfig:
             sharpening_radius=2.5,
             sharpening_amount=175,
             contrast_boost=1.2,
-            saturation_boost=1.15
+            saturation_boost=1.15,
         )
 
         assert config.enabled is True
@@ -132,8 +123,8 @@ class TestPostProcessingConfig:
         config = PostProcessingConfig(
             sharpening_radius=5.0,  # Max 10.0
             sharpening_amount=250,  # Max 300
-            contrast_boost=1.5,     # Max 2.0
-            saturation_boost=1.8    # Max 2.0
+            contrast_boost=1.5,  # Max 2.0
+            saturation_boost=1.8,  # Max 2.0
         )
         assert config.sharpening_radius == 5.0
 
@@ -152,7 +143,7 @@ class TestBackwardCompatibility:
             primary_colors=["#0066FF"],
             text_color="#FFFFFF",
             text_shadow=True,
-            text_shadow_color="#000000"
+            text_shadow_color="#000000",
         )
 
         processor = ImageProcessorV2()
@@ -174,7 +165,7 @@ class TestBackwardCompatibility:
                 headline=TextElementStyle(
                     shadow=TextShadow(enabled=False)  # Override: no shadow for headline
                 )
-            )
+            ),
         )
 
         processor = ImageProcessorV2()
@@ -190,34 +181,23 @@ class TestImageProcessorV2:
     @pytest.fixture
     def test_image(self):
         """Create a test image."""
-        return Image.new('RGB', (1024, 1024), color='white')
+        return Image.new("RGB", (1024, 1024), color="white")
 
     @pytest.fixture
     def test_message(self):
         """Create a test message."""
-        return CampaignMessage(
-            locale="en-US",
-            headline="Test Headline",
-            subheadline="Test Subheadline",
-            cta="Test CTA"
-        )
+        return CampaignMessage(locale="en-US", headline="Test Headline", subheadline="Test Subheadline", cta="Test CTA")
 
     def test_resize_to_aspect_ratio(self, test_image):
         """Test image resizing to different aspect ratios."""
         processor = ImageProcessorV2()
 
         # Test 1:1
-        resized = processor.resize_to_aspect_ratio(
-            self._image_to_bytes(test_image),
-            "1:1"
-        )
+        resized = processor.resize_to_aspect_ratio(self._image_to_bytes(test_image), "1:1")
         assert resized.size == (1024, 1024)
 
         # Test 16:9
-        resized = processor.resize_to_aspect_ratio(
-            self._image_to_bytes(test_image),
-            "16:9"
-        )
+        resized = processor.resize_to_aspect_ratio(self._image_to_bytes(test_image), "16:9")
         assert resized.size == (1920, 1080)
 
     def test_apply_text_overlay_with_per_element(self, test_image, test_message):
@@ -226,15 +206,9 @@ class TestImageProcessorV2:
             source_file="test.yaml",
             primary_colors=["#0066FF"],
             text_customization=TextCustomization(
-                headline=TextElementStyle(
-                    color="#FFFFFF",
-                    shadow=TextShadow(enabled=True)
-                ),
-                cta=TextElementStyle(
-                    color="#FF6600",
-                    outline=TextOutline(enabled=True, color="#FFFFFF", width=2)
-                )
-            )
+                headline=TextElementStyle(color="#FFFFFF", shadow=TextShadow(enabled=True)),
+                cta=TextElementStyle(color="#FF6600", outline=TextOutline(enabled=True, color="#FFFFFF", width=2)),
+            ),
         )
 
         processor = ImageProcessorV2()
@@ -247,11 +221,7 @@ class TestImageProcessorV2:
     def test_apply_post_processing(self, test_image):
         """Test post-processing application."""
         config = PostProcessingConfig(
-            enabled=True,
-            sharpening=True,
-            sharpening_radius=2.0,
-            color_correction=True,
-            contrast_boost=1.15
+            enabled=True, sharpening=True, sharpening_radius=2.0, color_correction=True, contrast_boost=1.15
         )
 
         processor = ImageProcessorV2()
@@ -291,13 +261,15 @@ class TestImageProcessorV2:
 
         # Should return same cached instance
         assert "regular_24" in processor.font_cache
+        assert font1 is font2
 
     @staticmethod
     def _image_to_bytes(image: Image.Image) -> bytes:
         """Convert PIL Image to bytes."""
         from io import BytesIO
+
         buffer = BytesIO()
-        image.save(buffer, format='PNG')
+        image.save(buffer, format="PNG")
         return buffer.getvalue()
 
 
@@ -312,27 +284,20 @@ class TestTextEffects:
     @pytest.fixture
     def test_image(self):
         """Create test image."""
-        return Image.new('RGBA', (1024, 1024), color=(255, 255, 255, 255))
+        return Image.new("RGBA", (1024, 1024), color=(255, 255, 255, 255))
 
     def test_background_box_rendering(self, processor, test_image):
         """Test background box rendering."""
-        background = TextBackgroundBox(
-            enabled=True,
-            color="#000000",
-            opacity=0.8,
-            padding=15
-        )
+        background = TextBackgroundBox(enabled=True, color="#000000", opacity=0.8, padding=15)
 
-        result = processor._draw_background_box(
-            test_image, 100, 100, 200, 50, background
-        )
+        result = processor._draw_background_box(test_image, 100, 100, 200, 50, background)
 
         assert result is not None
-        assert result.mode == 'RGBA'
+        assert result.mode == "RGBA"
 
     def test_text_outline_rendering(self, processor, test_image):
         """Test text outline rendering."""
-        from PIL import ImageDraw, ImageFont
+        from PIL import ImageDraw
 
         draw = ImageDraw.Draw(test_image)
         font = processor._load_font(24, "regular")
@@ -345,14 +310,11 @@ class TestTextEffects:
 def test_integration_full_pipeline():
     """Integration test: Full pipeline with Phase 1 features."""
     # Create test image
-    test_image = Image.new('RGB', (1024, 1024), color='white')
+    test_image = Image.new("RGB", (1024, 1024), color="white")
 
     # Create message
     message = CampaignMessage(
-        locale="en-US",
-        headline="Premium Quality",
-        subheadline="Professional Results",
-        cta="Try Now"
+        locale="en-US", headline="Premium Quality", subheadline="Professional Results", cta="Try Now"
     )
 
     # Create guidelines with Phase 1 features
@@ -361,26 +323,16 @@ def test_integration_full_pipeline():
         primary_colors=["#FF6600", "#0066FF"],
         text_customization=TextCustomization(
             headline=TextElementStyle(
-                color="#FFFFFF",
-                font_weight="bold",
-                shadow=TextShadow(enabled=True, color="#000000")
+                color="#FFFFFF", font_weight="bold", shadow=TextShadow(enabled=True, color="#000000")
             ),
-            subheadline=TextElementStyle(
-                color="#CCCCCC",
-                shadow=TextShadow(enabled=False)
-            ),
+            subheadline=TextElementStyle(color="#CCCCCC", shadow=TextShadow(enabled=False)),
             cta=TextElementStyle(
                 color="#FF6600",
                 outline=TextOutline(enabled=True, color="#FFFFFF", width=2),
-                background=TextBackgroundBox(enabled=True, color="#000000", opacity=0.8)
-            )
+                background=TextBackgroundBox(enabled=True, color="#000000", opacity=0.8),
+            ),
         ),
-        post_processing=PostProcessingConfig(
-            enabled=True,
-            sharpening=True,
-            color_correction=True,
-            contrast_boost=1.15
-        )
+        post_processing=PostProcessingConfig(enabled=True, sharpening=True, color_correction=True, contrast_boost=1.15),
     )
 
     # Process image

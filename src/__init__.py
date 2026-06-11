@@ -6,17 +6,16 @@ Version: 1.0.0
 __version__ = "2.0.0"
 __author__ = "Creative Automation Team"
 
-from src.models import (
-    Product,
-    CampaignMessage,
-    CampaignBrief,
-    ComprehensiveBrandGuidelines,
-    LocalizationGuidelines,
-    GeneratedAsset,
-    CampaignOutput
-)
-
 from src.config import Config, get_config
+from src.models import (
+    CampaignBrief,
+    CampaignMessage,
+    CampaignOutput,
+    ComprehensiveBrandGuidelines,
+    GeneratedAsset,
+    LocalizationGuidelines,
+    Product,
+)
 
 __all__ = [
     "Product",

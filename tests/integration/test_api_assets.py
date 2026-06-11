@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,10 +13,7 @@ from tests.integration.conftest import (
     CAMPAIGN_ID,
     FakeScalarResult,
     _make_asset,
-    _make_campaign,
-    admin_headers,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -85,9 +83,7 @@ class TestListCampaignAssets:
 
         _db_returning_sequence(mock_db, CAMPAIGN_ID, 1, [asset])
 
-        resp = await ac.get(
-            f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?locale=en-US"
-        )
+        resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?locale=en-US")
 
         assert resp.status_code == 200
         assert len(resp.json()["data"]) == 1
@@ -99,9 +95,7 @@ class TestListCampaignAssets:
 
         _db_returning_sequence(mock_db, CAMPAIGN_ID, 1, [asset])
 
-        resp = await ac.get(
-            f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?aspect_ratio=1:1"
-        )
+        resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?aspect_ratio=1:1")
 
         assert resp.status_code == 200
 
@@ -112,9 +106,7 @@ class TestListCampaignAssets:
 
         _db_returning_sequence(mock_db, CAMPAIGN_ID, 1, [asset])
 
-        resp = await ac.get(
-            f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?generation_method=firefly"
-        )
+        resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?generation_method=firefly")
 
         assert resp.status_code == 200
 
@@ -124,9 +116,7 @@ class TestListCampaignAssets:
 
         _db_returning_sequence(mock_db, CAMPAIGN_ID, 50, [])
 
-        resp = await ac.get(
-            f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?page=3&per_page=5"
-        )
+        resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?page=3&per_page=5")
 
         assert resp.status_code == 200
         meta = resp.json()["meta"]
@@ -246,9 +236,7 @@ def _make_generating_process_campaign(*, output_dir, image_backend):
                 for ratio in brief.aspect_ratios:
                     png = await image_backend.generate_image()
                     ratio_seg = ratio.replace(":", "x")
-                    asset_dir = os.path.join(
-                        output_dir, product.product_id, locale, ratio_seg
-                    )
+                    asset_dir = os.path.join(output_dir, product.product_id, locale, ratio_seg)
                     os.makedirs(asset_dir, exist_ok=True)
                     file_path = os.path.join(asset_dir, "asset.png")
                     with open(file_path, "wb") as fh:
@@ -282,7 +270,7 @@ def _make_generating_process_campaign(*, output_dir, image_backend):
 
 
 async def _seed_editor_header(session):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.api.dependencies import create_access_token
     from src.db.models import User
@@ -294,8 +282,8 @@ async def _seed_editor_header(session):
         display_name="Asset Editor",
         role="editor",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(user)
     await session.flush()
@@ -350,17 +338,11 @@ class TestWorkerAssetPersistence:
         job_db_id = created["latest_job"]["id"]
 
         # --- drive the REAL worker (generation faked, persistence real) ---
-        gen = _make_generating_process_campaign(
-            output_dir=out_dir, image_backend=image_backend_mock
-        )
-        await fake_arq_pool.drive(
-            campaign_db_id, job_db_id, session=session, process_campaign=gen
-        )
+        gen = _make_generating_process_campaign(output_dir=out_dir, image_backend=image_backend_mock)
+        await fake_arq_pool.drive(campaign_db_id, job_db_id, session=session, process_campaign=gen)
 
         # --- GET /campaigns/{id}/assets -> exactly 4 ---
-        resp = await client.get(
-            f"{_E2E_API}/campaigns/{campaign_db_id}/assets", headers=headers
-        )
+        resp = await client.get(f"{_E2E_API}/campaigns/{campaign_db_id}/assets", headers=headers)
         assert resp.status_code == 200, resp.text
         assert resp.json()["meta"]["total"] == _E2E_EXPECTED
         assert len(resp.json()["data"]) == _E2E_EXPECTED
@@ -370,22 +352,14 @@ class TestWorkerAssetPersistence:
             assert item["storage_key"]
 
         # --- reprocess -> drive again -> still exactly 4 (no dupes) ---
-        rp = await client.post(
-            f"{_E2E_API}/campaigns/{campaign_db_id}/reprocess", headers=headers
-        )
+        rp = await client.post(f"{_E2E_API}/campaigns/{campaign_db_id}/reprocess", headers=headers)
         assert rp.status_code == 200, rp.text
         reprocess_job_id = rp.json()["data"]["id"]
 
-        gen2 = _make_generating_process_campaign(
-            output_dir=out_dir, image_backend=image_backend_mock
-        )
-        await fake_arq_pool.drive(
-            campaign_db_id, reprocess_job_id, session=session, process_campaign=gen2
-        )
+        gen2 = _make_generating_process_campaign(output_dir=out_dir, image_backend=image_backend_mock)
+        await fake_arq_pool.drive(campaign_db_id, reprocess_job_id, session=session, process_campaign=gen2)
 
-        resp2 = await client.get(
-            f"{_E2E_API}/campaigns/{campaign_db_id}/assets", headers=headers
-        )
+        resp2 = await client.get(f"{_E2E_API}/campaigns/{campaign_db_id}/assets", headers=headers)
         assert resp2.status_code == 200, resp2.text
         assert resp2.json()["meta"]["total"] == _E2E_EXPECTED, (
             "reprocess must not double assets (uq_asset_variant upsert)"
@@ -418,9 +392,7 @@ def _patch_factory_to(backend):
     import src.storage_factory as sf
 
     sf.get_default_storage_backend.cache_clear()
-    return _patch.object(
-        sf, "get_storage_backend", return_value=backend
-    ), _patch.object(
+    return _patch.object(sf, "get_storage_backend", return_value=backend), _patch.object(
         sf, "get_default_storage_backend", return_value=backend
     )
 
@@ -451,8 +423,15 @@ class TestBackendDownload:
     """Download resolves through the backend for real local + real S3/MinIO."""
 
     async def _run(
-        self, *, backend, client, session, fake_arq_pool, image_backend_mock,
-        out_dir, expected_png,
+        self,
+        *,
+        backend,
+        client,
+        session,
+        fake_arq_pool,
+        image_backend_mock,
+        out_dir,
+        expected_png,
     ):
         headers = await _seed_editor_header(session)
 
@@ -464,23 +443,15 @@ class TestBackendDownload:
 
         app.dependency_overrides[get_arq_pool] = _override_pool
 
-        campaign_db_id, job_db_id = await _create_campaign_and_get_ids(
-            client, headers, fake_arq_pool
-        )
+        campaign_db_id, job_db_id = await _create_campaign_and_get_ids(client, headers, fake_arq_pool)
 
         p1, p2 = _patch_factory_to(backend)
         with p1, p2:
             # Drive the REAL worker: it saves bytes ONCE through *backend*.
-            gen = _make_generating_process_campaign(
-                output_dir=out_dir, image_backend=image_backend_mock
-            )
-            await fake_arq_pool.drive(
-                campaign_db_id, job_db_id, session=session, process_campaign=gen
-            )
+            gen = _make_generating_process_campaign(output_dir=out_dir, image_backend=image_backend_mock)
+            await fake_arq_pool.drive(campaign_db_id, job_db_id, session=session, process_campaign=gen)
 
-            resp = await client.get(
-                f"{_E2E_API}/campaigns/{campaign_db_id}/assets", headers=headers
-            )
+            resp = await client.get(f"{_E2E_API}/campaigns/{campaign_db_id}/assets", headers=headers)
             assert resp.status_code == 200, resp.text
             items = resp.json()["data"]
             assert len(items) == _E2E_EXPECTED
@@ -493,9 +464,7 @@ class TestBackendDownload:
             stored = await backend.get(storage_key)
             assert stored == expected_png
 
-            dl = await client.get(
-                f"{_E2E_API}/assets/{asset_id}/download", headers=headers
-            )
+            dl = await client.get(f"{_E2E_API}/assets/{asset_id}/download", headers=headers)
             return dl, storage_key
 
     async def test_local_backend_streams_file_response(
@@ -539,7 +508,6 @@ class TestBackendDownload:
         tiny_png,
     ):
         import httpx
-
         from src.exceptions import StorageError
         from src.storage_s3 import S3StorageBackend
 
@@ -575,8 +543,6 @@ class TestBackendDownload:
             assert fetched.content.startswith(b"\x89PNG\r\n\x1a\n")
         finally:
             # Best-effort cleanup of every key written by this run.
-            for key in await backend.list_keys(
-                storage_key.rsplit("/products/", 1)[0]
-            ):
+            for key in await backend.list_keys(storage_key.rsplit("/products/", 1)[0]):
                 await backend.delete(key)
             await session.rollback()

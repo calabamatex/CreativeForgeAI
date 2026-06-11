@@ -19,6 +19,7 @@ The full backend x locale x ratio worst-case matrix (~45 paid calls) must use
 or PR-CI path. (No such matrix test exists on this branch yet; the convention is
 documented in ``tests/conftest.py``.)
 """
+
 import os
 
 import pytest
@@ -32,7 +33,5 @@ def test_paid_gate_runs_only_when_opted_in():
     ``RUN_PAID_TESTS=1``. Assert that invariant plus a trivial truth so the test
     is meaningful but costs nothing.
     """
-    assert os.getenv("RUN_PAID_TESTS") == "1", (
-        "paid test executed without RUN_PAID_TESTS=1 — the cost gate is broken"
-    )
+    assert os.getenv("RUN_PAID_TESTS") == "1", "paid test executed without RUN_PAID_TESTS=1 — the cost gate is broken"
     assert 1 + 1 == 2

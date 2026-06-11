@@ -212,9 +212,7 @@ async def process_campaign_job(ctx, campaign_id: str, job_id: str):
             # ``completed`` status commit atomically in ONE transaction: a
             # ``completed`` job always has all its asset rows visible, and a
             # failure leaves no partial set attributed to ``completed``.
-            persisted = await _persist_assets(
-                session, campaign.id, output, campaign.image_backend
-            )
+            persisted = await _persist_assets(session, campaign.id, output, campaign.image_backend)
 
             # Persist the run's REAL TechnicalMetrics (api calls, cache hit
             # rate, timings, peak memory) as a campaign_metrics row, within

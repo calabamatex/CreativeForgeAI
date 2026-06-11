@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.db.models import Job
 from src.exceptions import NotFoundError
@@ -63,12 +63,7 @@ class JobRepository:
         Returns:
             The latest ``Job`` for this campaign, or ``None``.
         """
-        stmt = (
-            select(Job)
-            .where(Job.campaign_id == campaign_id)
-            .order_by(Job.created_at.desc())
-            .limit(1)
-        )
+        stmt = select(Job).where(Job.campaign_id == campaign_id).order_by(Job.created_at.desc()).limit(1)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -98,7 +93,7 @@ class JobRepository:
         if job is None:
             raise NotFoundError("Job", str(job_id))
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job.progress_percent = progress_percent
         job.current_stage = current_stage
 
@@ -136,7 +131,7 @@ class JobRepository:
         if job is None:
             raise NotFoundError("Job", str(job_id))
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job.status = "completed"
         job.progress_percent = 100
         job.completed_at = now
@@ -169,7 +164,7 @@ class JobRepository:
         if job is None:
             raise NotFoundError("Job", str(job_id))
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job.status = "failed"
         job.completed_at = now
         job.error_message = error_message
@@ -199,7 +194,7 @@ class JobRepository:
         if job is None:
             raise NotFoundError("Job", str(job_id))
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job.status = "cancelled"
         job.completed_at = now
 
@@ -223,12 +218,7 @@ class JobRepository:
         Returns:
             A list of ``Job`` instances ordered by ``created_at`` descending.
         """
-        stmt = (
-            select(Job)
-            .order_by(Job.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(Job).order_by(Job.created_at.desc()).limit(limit).offset(offset)
 
         if status is not None:
             stmt = stmt.where(Job.status == status)

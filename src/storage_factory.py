@@ -35,10 +35,7 @@ def get_storage_backend(backend_type: str | None = None) -> StorageBackend:
     chosen = (backend_type or os.getenv("STORAGE_BACKEND", "local")).lower().strip()
 
     if chosen not in _BACKEND_TYPES:
-        raise ValueError(
-            f"Unknown storage backend '{chosen}'. "
-            f"Supported: {', '.join(sorted(_BACKEND_TYPES))}"
-        )
+        raise ValueError(f"Unknown storage backend '{chosen}'. Supported: {', '.join(sorted(_BACKEND_TYPES))}")
 
     logger.info("storage.factory", backend=chosen)
 

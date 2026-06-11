@@ -1,13 +1,14 @@
 """Google Gemini Imagen service using Imagen 4."""
-import aiohttp
+
 import asyncio
 import base64
-import json
-from typing import Optional
+
+import aiohttp
 import structlog
+
+from src.config import get_config
 from src.genai.base import ImageGenerationService
 from src.models import ComprehensiveBrandGuidelines
-from src.config import get_config
 
 logger = structlog.get_logger(__name__)
 
@@ -15,12 +16,9 @@ logger = structlog.get_logger(__name__)
 class GeminiImageService(ImageGenerationService):
     """Service for generating images using Google Gemini Imagen 4."""
 
-    def __init__(self, api_key: Optional[str] = None, max_retries: int = 3):
+    def __init__(self, api_key: str | None = None, max_retries: int = 3):
         config = get_config()
-        super().__init__(
-            api_key=api_key or config.GEMINI_API_KEY,
-            max_retries=max_retries
-        )
+        super().__init__(api_key=api_key or config.GEMINI_API_KEY, max_retries=max_retries)
         # Using Imagen 4 via Google AI Studio API (latest version as of 2025/2026)
         # Note: This uses the generativelanguage API with API key authentication
         # Available models: imagen-4.0-generate-001 (standard), imagen-4.0-fast-generate-001, imagen-4.0-ultra-generate-001
@@ -28,10 +26,7 @@ class GeminiImageService(ImageGenerationService):
         self.model = "imagen-4.0-generate-001"
 
     async def generate_image(
-        self,
-        prompt: str,
-        size: str = "1024x1024",
-        brand_guidelines: Optional[ComprehensiveBrandGuidelines] = None
+        self, prompt: str, size: str = "1024x1024", brand_guidelines: ComprehensiveBrandGuidelines | None = None
     ) -> bytes:
         """Generate image using Gemini Imagen 4."""
 
@@ -44,25 +39,15 @@ class GeminiImageService(ImageGenerationService):
         logger.debug("gemini.prompt", prompt=prompt)
 
         # Parse size
-        width, height = map(int, size.split('x'))
+        width, height = map(int, size.split("x"))
 
         # Google AI Studio API key goes in x-goog-api-key header
-        headers = {
-            "x-goog-api-key": self.api_key,
-            "Content-Type": "application/json"
-        }
+        headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
 
         # Google AI Studio Imagen API format (predict endpoint)
         payload = {
-            "instances": [
-                {
-                    "prompt": prompt
-                }
-            ],
-            "parameters": {
-                "sampleCount": 1,
-                "aspectRatio": self._get_aspect_ratio(width, height)
-            }
+            "instances": [{"prompt": prompt}],
+            "parameters": {"sampleCount": 1, "aspectRatio": self._get_aspect_ratio(width, height)},
         }
 
         # Add negative prompt if available
@@ -91,53 +76,50 @@ class GeminiImageService(ImageGenerationService):
                             raise Exception("Gemini API returned an unexpected response format")
                         return base64.b64decode(image_b64)
                     elif response.status == 429:
-                        await asyncio.sleep(2 ** attempt)
+                        await asyncio.sleep(2**attempt)
                         continue
                     else:
                         error_text = await response.text()
                         logger.warning("gemini.api_error", status=response.status, error=error_text)
                         if attempt < self.max_retries - 1:
-                            await asyncio.sleep(2 ** attempt)
+                            await asyncio.sleep(2**attempt)
                             continue
                         raise Exception(f"Gemini API error: {response.status}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
                     continue
                 raise
         raise Exception("Max retries exceeded for Gemini API")
-    
+
     def _get_aspect_ratio(self, width: int, height: int) -> str:
         """Determine aspect ratio for Imagen."""
         ratio = width / height
-        
+
         if abs(ratio - 1.0) < 0.1:
             return "1:1"
-        elif abs(ratio - 16/9) < 0.1:
+        elif abs(ratio - 16 / 9) < 0.1:
             return "16:9"
-        elif abs(ratio - 9/16) < 0.1:
+        elif abs(ratio - 9 / 16) < 0.1:
             return "9:16"
-        elif abs(ratio - 4/3) < 0.1:
+        elif abs(ratio - 4 / 3) < 0.1:
             return "4:3"
-        elif abs(ratio - 3/4) < 0.1:
+        elif abs(ratio - 3 / 4) < 0.1:
             return "3:4"
         else:
             return "1:1"  # Default to square
-    
-    def _get_negative_prompt(
-        self,
-        guidelines: Optional[ComprehensiveBrandGuidelines]
-    ) -> str:
+
+    def _get_negative_prompt(self, guidelines: ComprehensiveBrandGuidelines | None) -> str:
         """Build negative prompt from prohibited elements."""
         if not guidelines or not guidelines.prohibited_elements:
             return ""
-        
+
         return ", ".join(guidelines.prohibited_elements[:5])
-    
+
     def get_backend_name(self) -> str:
         """Return backend name."""
         return "Google Gemini Imagen 4"
-    
+
     def validate_config(self) -> tuple[bool, list[str]]:
         """Validate Gemini configuration."""
         errors = []

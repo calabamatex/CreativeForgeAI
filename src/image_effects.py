@@ -1,8 +1,7 @@
 """Logo overlay and post-processing effects for image processing (Phase 1)."""
 
-from PIL import Image, ImageFilter, ImageEnhance
-from typing import Tuple, Optional
 import structlog
+from PIL import Image, ImageEnhance, ImageFilter
 
 from src.models import ComprehensiveBrandGuidelines, PostProcessingConfig
 
@@ -12,13 +11,13 @@ logger = structlog.get_logger(__name__)
 def apply_logo_overlay(
     image: Image.Image,
     logo_path: str,
-    brand_guidelines: Optional[ComprehensiveBrandGuidelines] = None,
+    brand_guidelines: ComprehensiveBrandGuidelines | None = None,
 ) -> Image.Image:
     """Apply logo overlay to image with positioning and sizing based on brand guidelines."""
     try:
         logo = Image.open(logo_path)
-        if logo.mode != 'RGBA':
-            logo = logo.convert('RGBA')
+        if logo.mode != "RGBA":
+            logo = logo.convert("RGBA")
 
         # Get settings
         placement = "bottom-right"
@@ -48,25 +47,23 @@ def apply_logo_overlay(
         # Apply opacity
         if opacity < 1.0:
             logo_with_opacity = logo_resized.copy()
-            alpha = logo_with_opacity.getchannel('A')
+            alpha = logo_with_opacity.getchannel("A")
             alpha = alpha.point(lambda p: int(p * opacity))
             logo_with_opacity.putalpha(alpha)
             logo_resized = logo_with_opacity
 
         # Calculate position
-        x, y = _calculate_logo_position(
-            image.size, logo_resized.size, placement, clearspace
-        )
+        x, y = _calculate_logo_position(image.size, logo_resized.size, placement, clearspace)
 
         # Composite
-        if image.mode != 'RGBA':
-            image = image.convert('RGBA')
+        if image.mode != "RGBA":
+            image = image.convert("RGBA")
 
-        logo_layer = Image.new('RGBA', image.size, (0, 0, 0, 0))
+        logo_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
         logo_layer.paste(logo_resized, (x, y), logo_resized)
         result = Image.alpha_composite(image, logo_layer)
 
-        return result.convert('RGB')
+        return result.convert("RGB")
 
     except FileNotFoundError:
         logger.warning("image_effects.logo_not_found", path=logo_path)
@@ -77,11 +74,11 @@ def apply_logo_overlay(
 
 
 def _calculate_logo_position(
-    image_size: Tuple[int, int],
-    logo_size: Tuple[int, int],
+    image_size: tuple[int, int],
+    logo_size: tuple[int, int],
     placement: str,
     clearspace: int,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     """Calculate logo position based on placement setting."""
     img_width, img_height = image_size
     logo_width, logo_height = logo_size
@@ -98,7 +95,7 @@ def _calculate_logo_position(
 
 def apply_post_processing(
     image: Image.Image,
-    config: Optional[PostProcessingConfig] = None,
+    config: PostProcessingConfig | None = None,
 ) -> Image.Image:
     """
     Apply post-processing enhancements (Phase 1 feature).
@@ -114,15 +111,11 @@ def apply_post_processing(
 
     # 1. Sharpening
     if config.sharpening:
-        img = _apply_sharpening(
-            img, radius=config.sharpening_radius, amount=config.sharpening_amount
-        )
+        img = _apply_sharpening(img, radius=config.sharpening_radius, amount=config.sharpening_amount)
 
     # 2. Color correction
     if config.color_correction:
-        img = _apply_color_correction(
-            img, contrast=config.contrast_boost, saturation=config.saturation_boost
-        )
+        img = _apply_color_correction(img, contrast=config.contrast_boost, saturation=config.saturation_boost)
 
     return img
 
@@ -134,9 +127,7 @@ def _apply_sharpening(
 ) -> Image.Image:
     """Apply unsharp mask sharpening."""
     percent = amount / 100.0
-    return image.filter(
-        ImageFilter.UnsharpMask(radius=radius, percent=int(percent * 100), threshold=3)
-    )
+    return image.filter(ImageFilter.UnsharpMask(radius=radius, percent=int(percent * 100), threshold=3))
 
 
 def _apply_color_correction(

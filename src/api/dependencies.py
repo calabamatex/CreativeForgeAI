@@ -8,15 +8,15 @@ import os
 import time
 import uuid
 from collections import defaultdict, deque
-from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
+import structlog
 from fastapi import Cookie, Depends, Header, Request
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.api.errors import (
     AuthenticationError,
@@ -35,7 +35,7 @@ _secret_key_raw: str | None = os.getenv("SECRET_KEY")
 if not _secret_key_raw or len(_secret_key_raw) < 32:
     raise RuntimeError(
         "SECRET_KEY environment variable must be set and at least 32 characters. "
-        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+        'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(64))"'
     )
 SECRET_KEY: str = _secret_key_raw
 ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
@@ -102,7 +102,7 @@ def create_access_token(
     extra_claims: dict | None = None,
 ) -> str:
     """Create a short-lived access JWT."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     claims: dict = {
         "sub": str(user_id),
         "role": role,
@@ -118,7 +118,7 @@ def create_access_token(
 
 def create_refresh_token(user_id: str) -> str:
     """Create a long-lived refresh JWT."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     claims: dict = {
         "sub": str(user_id),
         "type": "refresh",
@@ -150,7 +150,7 @@ def token_remaining_seconds(payload: dict) -> int:
     exp = payload.get("exp")
     if exp is None:
         return 60
-    now = datetime.now(timezone.utc).timestamp()
+    now = datetime.now(UTC).timestamp()
     return max(1, int(exp - now))
 
 
@@ -327,9 +327,7 @@ def require_role(allowed_roles: list[str]):
 
     async def _guard(user=Depends(get_current_user)):
         if user.role not in allowed_roles:
-            raise AuthorizationError(
-                f"Role '{user.role}' is not permitted. Required: {allowed_roles}"
-            )
+            raise AuthorizationError(f"Role '{user.role}' is not permitted. Required: {allowed_roles}")
         return user
 
     return _guard
@@ -447,9 +445,7 @@ async def check_rate_limit(request: Request):
     from src.cache import CacheUnavailable, get_cache  # lazy import
 
     try:
-        count, retry_after = await get_cache().incr_rate_limit(
-            key, RATE_WINDOW_SECONDS, _time.time()
-        )
+        count, retry_after = await get_cache().incr_rate_limit(key, RATE_WINDOW_SECONDS, _time.time())
     except CacheUnavailable as exc:
         # Fail OPEN to the per-process limiter (availability over strictness).
         logger.warning("ratelimit.redis_unavailable_fallback", error=str(exc))

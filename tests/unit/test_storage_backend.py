@@ -13,11 +13,9 @@ import os
 from pathlib import Path
 
 import pytest
-
 from src.exceptions import StorageError
 from src.storage_backend import build_asset_key, validate_storage_key
 from src.storage_local import LocalStorageBackend
-
 
 # ---------------------------------------------------------------------------
 # validate_storage_key

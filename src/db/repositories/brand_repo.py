@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.db.models import BrandGuideline
 from src.exceptions import NotFoundError
@@ -109,11 +109,9 @@ class BrandRepository:
             if hasattr(brand, key):
                 setattr(brand, key, value)
 
-        brand.updated_at = datetime.now(timezone.utc)
+        brand.updated_at = datetime.now(UTC)
         await self._session.flush()
-        logger.info(
-            "brand.updated", brand_id=str(brand_id), fields=list(kwargs.keys())
-        )
+        logger.info("brand.updated", brand_id=str(brand_id), fields=list(kwargs.keys()))
         return brand
 
     async def delete(self, brand_id: uuid.UUID) -> None:
@@ -130,9 +128,7 @@ class BrandRepository:
         await self._session.flush()
         logger.info("brand.deleted", brand_id=str(brand_id))
 
-    async def list_brands(
-        self, limit: int = 20, offset: int = 0
-    ) -> list[BrandGuideline]:
+    async def list_brands(self, limit: int = 20, offset: int = 0) -> list[BrandGuideline]:
         """Return a paginated list of brand guidelines.
 
         Args:
@@ -142,11 +138,6 @@ class BrandRepository:
         Returns:
             A list of ``BrandGuideline`` instances ordered by ``created_at`` descending.
         """
-        stmt = (
-            select(BrandGuideline)
-            .order_by(BrandGuideline.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(BrandGuideline).order_by(BrandGuideline.created_at.desc()).limit(limit).offset(offset)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())

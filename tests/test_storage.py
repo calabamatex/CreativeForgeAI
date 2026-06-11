@@ -1,11 +1,11 @@
 """
 Tests for storage manager (file system operations).
 """
-import pytest
-from pathlib import Path
+
 import json
+from pathlib import Path
+
 from PIL import Image
-import io
 
 
 class TestStorageManager:
@@ -35,11 +35,7 @@ class TestStorageManager:
         storage.create_campaign_directory("TEST")
 
         path = storage.get_asset_path(
-            campaign_id="TEST",
-            locale="en-US",
-            product_id="PROD-001",
-            aspect_ratio="1:1",
-            format="png"
+            campaign_id="TEST", locale="en-US", product_id="PROD-001", aspect_ratio="1:1", format="png"
         )
 
         assert path is not None
@@ -59,12 +55,10 @@ class TestStorageManager:
         storage = StorageManager()
         storage.create_campaign_directory("TEST")
 
-        path = storage.get_asset_path(
-            "TEST", "en-US", "P1", "1:1", "png"
-        )
+        path = storage.get_asset_path("TEST", "en-US", "P1", "1:1", "png")
 
         # Create a simple test image
-        img = Image.new('RGB', (100, 100), color='red')
+        img = Image.new("RGB", (100, 100), color="red")
         storage.save_image(img, path)
 
         assert path.exists()
@@ -72,8 +66,8 @@ class TestStorageManager:
 
     def test_save_report(self, mock_env_vars, tmp_path, monkeypatch):
         """Test saving campaign report."""
-        from src.storage import StorageManager
         from src.models import CampaignOutput, GeneratedAsset
+        from src.storage import StorageManager
 
         monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
 
@@ -110,8 +104,8 @@ class TestStorageManager:
 
     def test_directory_structure(self, mock_env_vars, tmp_path, monkeypatch):
         """Test complete directory structure creation."""
-        from src.storage import StorageManager
         from src import config
+        from src.storage import StorageManager
 
         monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
         config._config = None  # Force config reload
@@ -122,8 +116,8 @@ class TestStorageManager:
         # Create paths for multiple assets
         for locale in ["en-US", "es-MX"]:
             for product in ["P1", "P2"]:
-                path = storage.get_asset_path("TEST", locale, product, "1:1", "png")
-                # Path parent directories are created automatically
+                # Side effect under test: parent directories are created.
+                storage.get_asset_path("TEST", locale, product, "1:1", "png")
 
         # Verify structure
         assert (tmp_path / "TEST").exists()
@@ -143,8 +137,8 @@ class TestStorageManager:
 
     def test_list_campaign_assets(self, mock_env_vars, tmp_path, monkeypatch):
         """Test listing all assets in a campaign."""
-        from src.storage import StorageManager
         from src import config
+        from src.storage import StorageManager
 
         monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
         config._config = None  # Force config reload
@@ -155,7 +149,7 @@ class TestStorageManager:
         # Save multiple assets
         for i in range(3):
             path = storage.get_asset_path("TEST", "en-US", f"P{i}", "1:1", "png")
-            img = Image.new('RGB', (100, 100), color='blue')
+            img = Image.new("RGB", (100, 100), color="blue")
             storage.save_image(img, path)
 
         # List assets - assets are stored under output_dir/product_id/campaign_id/...
@@ -169,8 +163,8 @@ class TestStorageIntegration:
 
     def test_full_campaign_storage(self, mock_env_vars, tmp_path, monkeypatch):
         """Test storing complete campaign output."""
-        from src.storage import StorageManager
         from src.models import CampaignOutput, GeneratedAsset
+        from src.storage import StorageManager
 
         monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
 
@@ -182,10 +176,8 @@ class TestStorageIntegration:
         for locale in ["en-US", "es-MX"]:
             for product in ["P1", "P2"]:
                 for ratio in ["1:1", "9:16"]:
-                    path = storage.get_asset_path(
-                        "FULL-TEST", locale, product, ratio, "png"
-                    )
-                    img = Image.new('RGB', (100, 100), color='green')
+                    path = storage.get_asset_path("FULL-TEST", locale, product, ratio, "png")
+                    img = Image.new("RGB", (100, 100), color="green")
                     storage.save_image(img, path)
 
                     asset = GeneratedAsset(
@@ -193,7 +185,7 @@ class TestStorageIntegration:
                         locale=locale,
                         aspect_ratio=ratio,
                         file_path=str(path),
-                        generation_method="firefly"
+                        generation_method="firefly",
                     )
                     assets.append(asset)
 
@@ -204,7 +196,7 @@ class TestStorageIntegration:
             generated_assets=assets,
             total_assets=len(assets),
             locales_processed=["en-US", "es-MX"],
-            products_processed=["P1", "P2"]
+            products_processed=["P1", "P2"],
         )
 
         report_path = storage.save_report(output, "FULL-TEST", "P1")

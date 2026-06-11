@@ -1,29 +1,25 @@
 """
 Integration tests for the main pipeline orchestrator.
 """
-import pytest
-from unittest.mock import patch, AsyncMock
+
 import json
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 
 class TestCreativeAutomationPipeline:
     """Test main pipeline orchestrator."""
 
-    @patch('aiohttp.ClientSession.post')
-    @patch('aiohttp.ClientSession.get')
+    @patch("aiohttp.ClientSession.post")
+    @patch("aiohttp.ClientSession.get")
     @pytest.mark.asyncio
     async def test_process_campaign_basic(
-        self,
-        mock_get,
-        mock_post,
-        example_brief,
-        mock_firefly_response,
-        mock_image_bytes,
-        tmp_path
+        self, mock_get, mock_post, example_brief, mock_firefly_response, mock_image_bytes, tmp_path
     ):
         """Test basic campaign processing."""
-        from src.pipeline import CreativeAutomationPipeline
         from src.models import CampaignBrief
+        from src.pipeline import CreativeAutomationPipeline
 
         # Mock Firefly API
         mock_api_response = AsyncMock()
@@ -34,13 +30,10 @@ class TestCreativeAutomationPipeline:
         mock_image_response.status = 200
         mock_image_response.read = AsyncMock(return_value=mock_image_bytes)
 
-        mock_post.return_value.__aenter__.side_effect = [
-            mock_api_response,
-            mock_image_response
-        ]
+        mock_post.return_value.__aenter__.side_effect = [mock_api_response, mock_image_response]
 
         # Set output directory to temp
-        with patch('src.storage.StorageManager') as mock_storage:
+        with patch("src.storage.StorageManager") as mock_storage:
             mock_storage.return_value.create_campaign_directory = lambda x: None
             mock_storage.return_value.save_image = lambda x, y: None
             mock_storage.return_value.get_asset_path = lambda *args: tmp_path / "asset.png"
@@ -55,19 +48,14 @@ class TestCreativeAutomationPipeline:
             assert output.campaign_id == "TEST-CAMPAIGN-001"
             assert output.total_assets >= 0
 
-    @patch('aiohttp.ClientSession.post')
+    @patch("aiohttp.ClientSession.post")
     @pytest.mark.asyncio
     async def test_process_campaign_with_openai(
-        self,
-        mock_post,
-        example_brief,
-        mock_openai_response,
-        mock_image_bytes,
-        tmp_path
+        self, mock_post, example_brief, mock_openai_response, mock_image_bytes, tmp_path
     ):
         """Test campaign processing with OpenAI backend."""
-        from src.pipeline import CreativeAutomationPipeline
         from src.models import CampaignBrief
+        from src.pipeline import CreativeAutomationPipeline
 
         # Update brief to use OpenAI
         brief_data = example_brief.copy()
@@ -80,13 +68,13 @@ class TestCreativeAutomationPipeline:
 
         mock_post.return_value.__aenter__.return_value = mock_api_response
 
-        with patch('aiohttp.ClientSession.get') as mock_get:
+        with patch("aiohttp.ClientSession.get") as mock_get:
             mock_image_response = AsyncMock()
             mock_image_response.status = 200
             mock_image_response.read = AsyncMock(return_value=mock_image_bytes)
             mock_get.return_value.__aenter__.return_value = mock_image_response
 
-            with patch('src.storage.StorageManager') as mock_storage:
+            with patch("src.storage.StorageManager") as mock_storage:
                 mock_storage.return_value.create_campaign_directory = lambda x: None
                 mock_storage.return_value.save_image = lambda x, y: None
                 mock_storage.return_value.get_asset_path = lambda *args: tmp_path / "asset.png"
@@ -100,18 +88,12 @@ class TestCreativeAutomationPipeline:
                 assert output is not None
                 assert output.campaign_id == "TEST-CAMPAIGN-001"
 
-    @patch('aiohttp.ClientSession.post')
+    @patch("aiohttp.ClientSession.post")
     @pytest.mark.asyncio
-    async def test_process_campaign_with_gemini(
-        self,
-        mock_post,
-        example_brief,
-        mock_gemini_response,
-        tmp_path
-    ):
+    async def test_process_campaign_with_gemini(self, mock_post, example_brief, mock_gemini_response, tmp_path):
         """Test campaign processing with Gemini backend."""
-        from src.pipeline import CreativeAutomationPipeline
         from src.models import CampaignBrief
+        from src.pipeline import CreativeAutomationPipeline
 
         # Update brief to use Gemini
         brief_data = example_brief.copy()
@@ -123,7 +105,7 @@ class TestCreativeAutomationPipeline:
         mock_api_response.json = AsyncMock(return_value=mock_gemini_response)
         mock_post.return_value.__aenter__.return_value = mock_api_response
 
-        with patch('src.storage.StorageManager') as mock_storage:
+        with patch("src.storage.StorageManager") as mock_storage:
             mock_storage.return_value.create_campaign_directory = lambda x: None
             mock_storage.return_value.save_image = lambda x, y: None
             mock_storage.return_value.get_asset_path = lambda *args: tmp_path / "asset.png"
@@ -140,7 +122,6 @@ class TestCreativeAutomationPipeline:
     async def test_pipeline_backend_override(self, example_brief):
         """Test pipeline backend override."""
         from src.pipeline import CreativeAutomationPipeline
-        from src.models import CampaignBrief
 
         # Brief says firefly, but we override to openai
         brief_data = example_brief.copy()
@@ -152,15 +133,10 @@ class TestCreativeAutomationPipeline:
         assert pipeline.default_image_backend == "openai"
 
     @pytest.mark.asyncio
-    async def test_pipeline_with_brand_guidelines(
-        self,
-        example_brief,
-        brand_guidelines_text,
-        tmp_path
-    ):
+    async def test_pipeline_with_brand_guidelines(self, example_brief, brand_guidelines_text, tmp_path):
         """Test pipeline with brand guidelines."""
-        from src.pipeline import CreativeAutomationPipeline
         from src.models import CampaignBrief
+        from src.pipeline import CreativeAutomationPipeline
 
         # Create mock brand guidelines file
         guidelines_path = tmp_path / "brand.md"
@@ -169,24 +145,26 @@ class TestCreativeAutomationPipeline:
         brief_data = example_brief.copy()
         brief_data["brand_guidelines_file"] = str(guidelines_path)
 
-        with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("aiohttp.ClientSession.post") as mock_post:
             # Mock Claude response for guideline extraction
             extracted = {
                 "source_file": str(guidelines_path),
                 "primary_colors": ["#0066CC"],
-                "primary_font": "Montserrat"
+                "primary_font": "Montserrat",
             }
 
             mock_response = AsyncMock()
             mock_response.status = 200
-            mock_response.json = AsyncMock(return_value={
-                'content': [{'text': json.dumps(extracted)}],
-                'usage': {'input_tokens': 100, 'output_tokens': 50}
-            })
+            mock_response.json = AsyncMock(
+                return_value={
+                    "content": [{"text": json.dumps(extracted)}],
+                    "usage": {"input_tokens": 100, "output_tokens": 50},
+                }
+            )
             mock_post.return_value.__aenter__.return_value = mock_response
 
             # Pipeline should load guidelines
-            pipeline = CreativeAutomationPipeline()
+            CreativeAutomationPipeline()
             brief = CampaignBrief(**brief_data)
 
             # Verify brief has guidelines file
@@ -195,35 +173,39 @@ class TestCreativeAutomationPipeline:
     @pytest.mark.asyncio
     async def test_pipeline_error_handling(self, example_brief):
         """Test pipeline error handling."""
-        from src.pipeline import CreativeAutomationPipeline
         from src.models import CampaignBrief
+        from src.pipeline import CreativeAutomationPipeline
 
-        with patch('src.genai.factory.ImageGenerationFactory.create') as mock_factory:
+        with patch("src.genai.factory.ImageGenerationFactory.create") as mock_factory:
             # Make image generation fail
             mock_factory.side_effect = Exception("API Error")
 
             pipeline = CreativeAutomationPipeline()
             brief = CampaignBrief(**example_brief)
 
-            with pytest.raises(Exception):
+            # The injected failure is a bare Exception("API Error"); we only
+            # assert it propagates out of the pipeline, not its concrete type.
+            with pytest.raises(Exception):  # noqa: B017
                 await pipeline.process_campaign(brief)
 
     @pytest.mark.asyncio
     async def test_pipeline_partial_failure(self, example_brief, mock_firefly_response, mock_image_bytes, tmp_path):
         """Test pipeline continues on partial failures."""
-        from src.pipeline import CreativeAutomationPipeline
         from src.models import CampaignBrief
+        from src.pipeline import CreativeAutomationPipeline
 
         # Add second product
         brief_data = example_brief.copy()
-        brief_data["products"].append({
-            "product_id": "TEST-PROD-002",
-            "product_name": "Product 2",
-            "product_description": "Description",
-            "product_category": "Category"
-        })
+        brief_data["products"].append(
+            {
+                "product_id": "TEST-PROD-002",
+                "product_name": "Product 2",
+                "product_description": "Description",
+                "product_category": "Category",
+            }
+        )
 
-        with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("aiohttp.ClientSession.post") as mock_post:
             # First product succeeds, second fails
             mock_success = AsyncMock()
             mock_success.status = 200
@@ -236,13 +218,9 @@ class TestCreativeAutomationPipeline:
             mock_image.status = 200
             mock_image.read = AsyncMock(return_value=mock_image_bytes)
 
-            mock_post.return_value.__aenter__.side_effect = [
-                mock_success,
-                mock_image,
-                mock_fail
-            ]
+            mock_post.return_value.__aenter__.side_effect = [mock_success, mock_image, mock_fail]
 
-            with patch('src.storage.StorageManager') as mock_storage:
+            with patch("src.storage.StorageManager") as mock_storage:
                 mock_storage.return_value.create_campaign_directory = lambda x: None
                 mock_storage.return_value.save_image = lambda x, y: None
                 mock_storage.return_value.get_asset_path = lambda *args: tmp_path / "asset.png"
@@ -262,18 +240,12 @@ class TestPipelineIntegration:
     """End-to-end integration tests."""
 
     @pytest.mark.asyncio
-    async def test_full_pipeline_execution(
-        self,
-        example_brief,
-        mock_firefly_response,
-        mock_image_bytes,
-        tmp_path
-    ):
+    async def test_full_pipeline_execution(self, example_brief, mock_firefly_response, mock_image_bytes, tmp_path):
         """Test full pipeline execution."""
-        from src.pipeline import CreativeAutomationPipeline
         from src.models import CampaignBrief
+        from src.pipeline import CreativeAutomationPipeline
 
-        with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("aiohttp.ClientSession.post") as mock_post:
             mock_api = AsyncMock()
             mock_api.status = 200
             mock_api.json = AsyncMock(return_value=mock_firefly_response)
@@ -282,11 +254,9 @@ class TestPipelineIntegration:
             mock_img.status = 200
             mock_img.read = AsyncMock(return_value=mock_image_bytes)
 
-            mock_post.return_value.__aenter__.side_effect = [
-                mock_api, mock_img
-            ]
+            mock_post.return_value.__aenter__.side_effect = [mock_api, mock_img]
 
-            with patch('src.storage.StorageManager') as mock_storage:
+            with patch("src.storage.StorageManager") as mock_storage:
                 mock_storage.return_value.create_campaign_directory = lambda x: None
                 mock_storage.return_value.save_image = lambda x, y: None
                 mock_storage.return_value.get_asset_path = lambda *args: tmp_path / "asset.png"

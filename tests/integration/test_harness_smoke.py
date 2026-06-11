@@ -19,7 +19,6 @@ import uuid
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-
 from src.db.models import Campaign, GeneratedAsset, Job
 
 pytestmark = pytest.mark.asyncio
@@ -64,11 +63,7 @@ async def test_insert_and_query_asset(real_db_session):
     real_db_session.add(asset)
     await real_db_session.commit()  # commits to the savepoint only
 
-    fetched = (
-        await real_db_session.execute(
-            select(GeneratedAsset).where(GeneratedAsset.id == asset.id)
-        )
-    ).scalar_one()
+    fetched = (await real_db_session.execute(select(GeneratedAsset).where(GeneratedAsset.id == asset.id))).scalar_one()
     assert fetched.product_id == "PROD-1"
     assert fetched.locale == "en-US"
     assert fetched.created_at is not None  # server_default applied -> real DB
@@ -81,9 +76,7 @@ async def test_per_test_isolation(real_db_session):
     query below would find a row (and the later insert would clash).
     """
     existing = (
-        await real_db_session.execute(
-            select(Campaign).where(Campaign.campaign_id == SHARED_CAMPAIGN_KEY)
-        )
+        await real_db_session.execute(select(Campaign).where(Campaign.campaign_id == SHARED_CAMPAIGN_KEY))
     ).scalar_one_or_none()
     assert existing is None, "row from a prior test leaked -> isolation broken"
 
@@ -141,12 +134,8 @@ async def test_fake_storage_round_trip(fake_storage_backend, tiny_png):
 async def test_fake_pool_records_and_dedupes(fake_arq_pool):
     """enqueue_job records calls; a duplicate _job_id is observable as deduped."""
     jid = "job-abc"
-    first = await fake_arq_pool.enqueue_job(
-        "process_campaign_job", "camp-1", jid, _job_id=jid
-    )
-    second = await fake_arq_pool.enqueue_job(
-        "process_campaign_job", "camp-1", jid, _job_id=jid
-    )
+    first = await fake_arq_pool.enqueue_job("process_campaign_job", "camp-1", jid, _job_id=jid)
+    second = await fake_arq_pool.enqueue_job("process_campaign_job", "camp-1", jid, _job_id=jid)
 
     assert first is not None and first.deduped is False
     assert second is None  # ARQ-style: dedup returns None
@@ -156,9 +145,7 @@ async def test_fake_pool_records_and_dedupes(fake_arq_pool):
     assert fake_arq_pool.enqueued[1].deduped is True
 
 
-async def test_pool_drives_real_task(
-    real_db_session, fake_arq_pool, fake_storage_backend
-):
+async def test_pool_drives_real_task(real_db_session, fake_arq_pool, fake_storage_backend):
     """The pool drives the real ``process_campaign_job`` in-process.
 
     Proves the drive mechanism end-to-end: a real campaign + job are inserted
@@ -260,9 +247,7 @@ async def test_pool_drives_real_task(
     assert seen_briefs[0].campaign_id == "HARNESS-DRIVE-001"
 
     # And the job reached a terminal ``"completed"`` state with timestamps set.
-    fetched_job = (
-        await real_db_session.execute(select(Job).where(Job.id == job.id))
-    ).scalar_one()
+    fetched_job = (await real_db_session.execute(select(Job).where(Job.id == job.id))).scalar_one()
     assert fetched_job.status == "completed"
     assert fetched_job.progress_percent == 100
     assert fetched_job.started_at is not None

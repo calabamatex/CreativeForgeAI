@@ -5,12 +5,12 @@ from __future__ import annotations
 import math
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import structlog
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.api.dependencies import (
     check_rate_limit,
@@ -19,7 +19,6 @@ from src.api.dependencies import (
     require_role,
 )
 from src.api.errors import BadRequestError, NotFoundError
-from src.security import validate_upload_extension, validate_upload_size
 from src.api.schemas import (
     BrandCreateRequest,
     BrandResponse,
@@ -29,6 +28,7 @@ from src.api.schemas import (
     PaginatedEnvelope,
     PaginationMeta,
 )
+from src.security import validate_upload_extension, validate_upload_size
 
 logger = structlog.get_logger(__name__)
 
@@ -90,16 +90,11 @@ async def list_brands(
     """List all brand guideline entries with pagination."""
     from src.db.models import BrandGuideline  # noqa: E402
 
-    total = (
-        await db.execute(select(func.count()).select_from(BrandGuideline))
-    ).scalar_one()
+    total = (await db.execute(select(func.count()).select_from(BrandGuideline))).scalar_one()
     total_pages = max(1, math.ceil(total / per_page))
 
     stmt = (
-        select(BrandGuideline)
-        .order_by(BrandGuideline.created_at.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
+        select(BrandGuideline).order_by(BrandGuideline.created_at.desc()).offset((page - 1) * per_page).limit(per_page)
     )
     result = await db.execute(stmt)
     brands = result.scalars().all()
@@ -136,7 +131,7 @@ async def create_brand(
     """
     from src.db.models import BrandGuideline  # noqa: E402
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     saved_path: str | None = None
     extracted: dict = {}
 
@@ -146,14 +141,14 @@ async def create_brand(
         try:
             validate_upload_extension(guidelines_file.filename)
         except ValueError as exc:
-            raise BadRequestError(detail=str(exc))
+            raise BadRequestError(detail=str(exc)) from exc
 
         # Read content and validate size (max 10 MB)
         content = await guidelines_file.read()
         try:
             validate_upload_size(len(content))
         except ValueError as exc:
-            raise BadRequestError(detail=str(exc))
+            raise BadRequestError(detail=str(exc)) from exc
 
         upload_dir = os.path.join("uploads", "brands")
         os.makedirs(upload_dir, exist_ok=True)
@@ -236,7 +231,7 @@ async def update_brand(
     updates = body.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(brand, field, value)
-    brand.updated_at = datetime.now(timezone.utc)
+    brand.updated_at = datetime.now(UTC)
     await db.flush()
 
     logger.info("brand.updated", brand_id=str(brand_id), fields=list(updates.keys()))

@@ -1,9 +1,11 @@
 """
 Tests for image processing operations (resize, overlay, etc.).
 """
+
+import io
+
 import pytest
 from PIL import Image
-import io
 
 
 class TestImageProcessor:
@@ -54,16 +56,14 @@ class TestImageProcessor:
         resized_image = processor.resize_to_aspect_ratio(mock_image_bytes, "1:1")
 
         # Then apply overlay
-        result = processor.apply_text_overlay(
-            resized_image,
-            message,
-            brand_guidelines=None
-        )
+        result = processor.apply_text_overlay(resized_image, message, brand_guidelines=None)
 
         assert result is not None
         assert isinstance(result, Image.Image)
 
-    def test_apply_text_overlay_with_guidelines(self, mock_image_bytes, example_campaign_message, brand_guidelines_model):
+    def test_apply_text_overlay_with_guidelines(
+        self, mock_image_bytes, example_campaign_message, brand_guidelines_model
+    ):
         """Test text overlay with brand guidelines."""
         from src.image_processor import ImageProcessorV2 as ImageProcessor
         from src.models import CampaignMessage
@@ -75,11 +75,7 @@ class TestImageProcessor:
         resized_image = processor.resize_to_aspect_ratio(mock_image_bytes, "1:1")
 
         # Apply with guidelines
-        result = processor.apply_text_overlay(
-            resized_image,
-            message,
-            brand_guidelines=brand_guidelines_model
-        )
+        result = processor.apply_text_overlay(resized_image, message, brand_guidelines=brand_guidelines_model)
 
         assert result is not None
         assert isinstance(result, Image.Image)
@@ -90,12 +86,7 @@ class TestImageProcessor:
 
         processor = ImageProcessor()
 
-        ratios_sizes = {
-            "1:1": (1024, 1024),
-            "9:16": (1080, 1920),
-            "16:9": (1920, 1080),
-            "4:5": (1080, 1350)
-        }
+        ratios_sizes = {"1:1": (1024, 1024), "9:16": (1080, 1920), "16:9": (1920, 1080), "4:5": (1080, 1350)}
 
         for ratio, expected_size in ratios_sizes.items():
             result = processor.resize_to_aspect_ratio(mock_image_bytes, ratio)
@@ -198,10 +189,10 @@ class TestFontLoading:
             f"Expected a real TrueType FreeTypeFont for weight={weight!r}, "
             f"got {type(font).__name__} (bitmap default => degraded typography)"
         )
+
     def test_load_font_warns_before_bitmap_fallback(self, monkeypatch):
         """When no TrueType font is found, a warning is logged before load_default()."""
         import structlog
-        from PIL import ImageFont
         from src import image_processor as ip_module
         from src.image_processor import ImageProcessorV2 as ImageProcessor
 
@@ -231,9 +222,9 @@ class TestFontLoading:
 
         # A warning must have been emitted before the fallback was used.
         warnings = [
-            entry for entry in logs
-            if entry.get("log_level") == "warning"
-            and entry.get("event") == "font_load_fallback_to_bitmap_default"
+            entry
+            for entry in logs
+            if entry.get("log_level") == "warning" and entry.get("event") == "font_load_fallback_to_bitmap_default"
         ]
         assert warnings, f"Expected a bitmap-fallback warning, got logs: {logs}"
         assert warnings[0]["weight"] == "bold"

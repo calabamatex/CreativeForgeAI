@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import UTC
 
 import pytest
-
 from src.api.dependencies import check_rate_limit, get_db
 from src.db.models import Campaign, Job
 
@@ -75,9 +75,7 @@ class _ASGIWebSocketClient:
     async def __aenter__(self):
         # Kick off the handshake: client requests connect.
         await self._to_app.put({"type": "websocket.connect"})
-        self._task = asyncio.ensure_future(
-            self._app(self._scope, self._receive, self._send)
-        )
+        self._task = asyncio.ensure_future(self._app(self._scope, self._receive, self._send))
         # Expect the server to accept.
         msg = await asyncio.wait_for(self._from_app.get(), timeout=5)
         assert msg["type"] == "websocket.accept", msg
@@ -108,7 +106,7 @@ class _ASGIWebSocketClient:
         if self._task is not None:
             try:
                 await asyncio.wait_for(self._task, timeout=5)
-            except (asyncio.TimeoutError, _WSClosed):
+            except (TimeoutError, _WSClosed):
                 self._task.cancel()
         return False
 
@@ -126,9 +124,7 @@ class _WSClosed(Exception):
 # ---------------------------------------------------------------------------
 
 
-async def _seed_campaign_and_job(
-    session, *, status: str = "queued"
-) -> tuple[str, str, uuid.UUID]:
+async def _seed_campaign_and_job(session, *, status: str = "queued") -> tuple[str, str, uuid.UUID]:
     """Insert a minimal campaign + job.
 
     Returns ``(campaign_id, job_id, owner_id)`` where ``owner_id`` is the
@@ -136,8 +132,9 @@ async def _seed_campaign_and_job(
     """
     creator_id = uuid.uuid4()
 
+    from datetime import datetime
+
     from src.db.models import User
-    from datetime import datetime, timezone
 
     user = User(
         id=creator_id,
@@ -146,8 +143,8 @@ async def _seed_campaign_and_job(
         display_name="WS Tester",
         role="editor",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(user)
     await session.flush()
@@ -213,9 +210,7 @@ def _make_app(real_db_session):
 # ---------------------------------------------------------------------------
 
 
-async def test_ws_streams_real_progress_then_closes_on_terminal(
-    real_db_session, monkeypatch
-):
+async def test_ws_streams_real_progress_then_closes_on_terminal(real_db_session, monkeypatch):
     """The socket emits INCREASING real progress and a terminal ``completed``.
 
     Drives the job row through 25 -> 60 -> 100/completed and asserts the client
@@ -266,9 +261,7 @@ async def test_ws_streams_real_progress_then_closes_on_terminal(
             if msg["progress_percent"] > after_progress:
                 return msg
 
-    async with _ASGIWebSocketClient(
-        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
-    ) as ws:
+    async with _ASGIWebSocketClient(app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)) as ws:
         # 1) Initial real frame: queued at 0.
         first = await ws.receive_json(timeout=10)
         received.append(first)
@@ -300,9 +293,7 @@ async def test_ws_streams_real_progress_then_closes_on_terminal(
     assert received, "no messages received"
     assert all(m["type"] in {"progress"} for m in received), received
     assert all(m["job_id"] == job_id for m in received)
-    assert not any(m.get("type") == "heartbeat" for m in received), (
-        "heartbeat-only loop still present"
-    )
+    assert not any(m.get("type") == "heartbeat" for m in received), "heartbeat-only loop still present"
 
     # Progress is non-decreasing and includes the real intermediate values.
     progresses = [m["progress_percent"] for m in received]
@@ -334,9 +325,7 @@ async def test_ws_already_terminal_sends_state_once_and_closes(real_db_session):
     app = _make_app(session)
     token = _owner_token(owner_id)
 
-    async with _ASGIWebSocketClient(
-        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
-    ) as ws:
+    async with _ASGIWebSocketClient(app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)) as ws:
         msg = await ws.receive_json(timeout=5)
         assert msg["type"] == "progress"
         assert msg["status"] == "failed"
@@ -381,9 +370,7 @@ async def test_ws_rejects_missing_token(real_db_session):
 
     from src.api.routes.ws import WS_CLOSE_UNAUTHENTICATED
 
-    async with _ASGIWebSocketClient(
-        app, WS_PATH_TEMPLATE.format(job_id=job_id)
-    ) as ws:
+    async with _ASGIWebSocketClient(app, WS_PATH_TEMPLATE.format(job_id=job_id)) as ws:
         msg = await ws.receive_json(timeout=5)
         assert msg["type"] == "error"
         assert msg["status"] == "unauthorized"
@@ -423,8 +410,8 @@ async def test_ws_rejects_revoked_token(real_db_session):
     token = _owner_token(owner_id)
 
     # Revoke the token by denylisting its jti (as /auth/logout would).
-    from src.cache import get_cache
     from jose import jwt as _jwt
+    from src.cache import get_cache
 
     jti = _jwt.get_unverified_claims(token)["jti"]
     await get_cache().connect()
@@ -432,9 +419,7 @@ async def test_ws_rejects_revoked_token(real_db_session):
 
     from src.api.routes.ws import WS_CLOSE_UNAUTHENTICATED
 
-    async with _ASGIWebSocketClient(
-        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
-    ) as ws:
+    async with _ASGIWebSocketClient(app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)) as ws:
         msg = await ws.receive_json(timeout=5)
         assert msg["type"] == "error"
         assert msg["status"] == "unauthorized"
@@ -458,9 +443,7 @@ async def test_ws_owner_can_stream(real_db_session):
     app = _make_app(session)
     token = _owner_token(owner_id)
 
-    async with _ASGIWebSocketClient(
-        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
-    ) as ws:
+    async with _ASGIWebSocketClient(app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)) as ws:
         msg = await ws.receive_json(timeout=5)
         assert msg["type"] == "progress"
         assert msg["status"] == "completed"
@@ -476,8 +459,9 @@ async def test_ws_rejects_non_owner(real_db_session):
     _c, job_id, _owner_id = await _seed_campaign_and_job(session, status="queued")
 
     # Seed a SECOND, unrelated user and authenticate as them.
+    from datetime import datetime
+
     from src.db.models import User
-    from datetime import datetime, timezone
 
     other_id = uuid.uuid4()
     other = User(
@@ -487,8 +471,8 @@ async def test_ws_rejects_non_owner(real_db_session):
         display_name="Other User",
         role="editor",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(other)
     await session.flush()
@@ -498,9 +482,7 @@ async def test_ws_rejects_non_owner(real_db_session):
 
     from src.api.routes.ws import WS_CLOSE_FORBIDDEN
 
-    async with _ASGIWebSocketClient(
-        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
-    ) as ws:
+    async with _ASGIWebSocketClient(app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)) as ws:
         msg = await ws.receive_json(timeout=5)
         assert msg["type"] == "error"
         assert msg["status"] == "forbidden"
@@ -515,8 +497,9 @@ async def test_ws_admin_can_stream_any_job(real_db_session):
     session = real_db_session
     _c, job_id, _owner_id = await _seed_campaign_and_job(session, status="queued")
 
+    from datetime import datetime
+
     from src.db.models import User
-    from datetime import datetime, timezone
 
     admin_id = uuid.uuid4()
     admin = User(
@@ -526,8 +509,8 @@ async def test_ws_admin_can_stream_any_job(real_db_session):
         display_name="Admin User",
         role="admin",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(admin)
     await session.flush()
@@ -540,9 +523,7 @@ async def test_ws_admin_can_stream_any_job(real_db_session):
     app = _make_app(session)
     token = _owner_token(admin_id, role="admin")
 
-    async with _ASGIWebSocketClient(
-        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
-    ) as ws:
+    async with _ASGIWebSocketClient(app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)) as ws:
         msg = await ws.receive_json(timeout=5)
         assert msg["type"] == "progress"
         assert msg["status"] == "completed"

@@ -6,10 +6,10 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import structlog
 
 from src.api.errors import AppError, app_error_handler, generic_exception_handler
 from src.cache import get_cache
@@ -70,8 +70,7 @@ def create_app() -> FastAPI:
     if "*" in origins and os.getenv("SECRET_KEY"):
         logger.warning(
             "cors.wildcard_rejected",
-            detail="CORS_ORIGINS='*' is not allowed outside local development. "
-                   "Set explicit origins in CORS_ORIGINS.",
+            detail="CORS_ORIGINS='*' is not allowed outside local development. Set explicit origins in CORS_ORIGINS.",
         )
         origins = ["http://localhost:5173"]
 
@@ -119,10 +118,10 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------
     # Routes
     # ------------------------------------------------------------------
-    from src.api.routes.auth import router as auth_router
-    from src.api.routes.campaigns import router as campaigns_router
     from src.api.routes.assets import router as assets_router
+    from src.api.routes.auth import router as auth_router
     from src.api.routes.brands import router as brands_router
+    from src.api.routes.campaigns import router as campaigns_router
     from src.api.routes.compliance import router as compliance_router
     from src.api.routes.jobs import router as jobs_router
     from src.api.routes.metrics import router as metrics_router

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aioboto3
 import structlog
@@ -41,13 +41,10 @@ class S3StorageBackend(StorageBackend):
         self._bucket = bucket or os.getenv("S3_BUCKET", "")
         if not self._bucket:
             raise StorageError(
-                "S3 bucket name is required.  Set S3_BUCKET env var "
-                "or pass 'bucket' to the constructor."
+                "S3 bucket name is required.  Set S3_BUCKET env var or pass 'bucket' to the constructor."
             )
         self._region = region or os.getenv("S3_REGION", "us-east-1")
-        self._endpoint_url: Optional[str] = endpoint_url or os.getenv(
-            "S3_ENDPOINT_URL"
-        )
+        self._endpoint_url: str | None = endpoint_url or os.getenv("S3_ENDPOINT_URL")
         self._session = aioboto3.Session()
         logger.info(
             "storage.s3.init",
@@ -60,9 +57,9 @@ class S3StorageBackend(StorageBackend):
     def bucket(self) -> str:
         return self._bucket
 
-    def _client_kwargs(self) -> Dict[str, Any]:
+    def _client_kwargs(self) -> dict[str, Any]:
         """Build keyword arguments for ``session.client('s3', ...)``."""
-        kwargs: Dict[str, Any] = {"region_name": self._region}
+        kwargs: dict[str, Any] = {"region_name": self._region}
         if self._endpoint_url:
             kwargs["endpoint_url"] = self._endpoint_url
         return kwargs
@@ -89,18 +86,14 @@ class S3StorageBackend(StorageBackend):
             )
             return key
         except ClientError as exc:
-            raise StorageError(
-                f"S3 put_object failed for key '{key}': {exc}"
-            ) from exc
+            raise StorageError(f"S3 put_object failed for key '{key}': {exc}") from exc
 
     async def get(self, key: str) -> bytes:
         """Download the object stored under *key*."""
         validate_storage_key(key)
         try:
             async with self._session.client("s3", **self._client_kwargs()) as s3:
-                response = await s3.get_object(
-                    Bucket=self._bucket, Key=key
-                )
+                response = await s3.get_object(Bucket=self._bucket, Key=key)
                 data = await response["Body"].read()
             logger.debug(
                 "storage.s3.get",
@@ -113,27 +106,21 @@ class S3StorageBackend(StorageBackend):
             error_code = exc.response.get("Error", {}).get("Code", "")
             if error_code == "NoSuchKey":
                 raise StorageError(f"Key not found in S3: {key}") from exc
-            raise StorageError(
-                f"S3 get_object failed for key '{key}': {exc}"
-            ) from exc
+            raise StorageError(f"S3 get_object failed for key '{key}': {exc}") from exc
 
     async def delete(self, key: str) -> None:
         """Delete the S3 object.  Idempotent -- no error if absent."""
         validate_storage_key(key)
         try:
             async with self._session.client("s3", **self._client_kwargs()) as s3:
-                await s3.delete_object(
-                    Bucket=self._bucket, Key=key
-                )
+                await s3.delete_object(Bucket=self._bucket, Key=key)
             logger.info(
                 "storage.s3.deleted",
                 key=key,
                 bucket=self._bucket,
             )
         except ClientError as exc:
-            raise StorageError(
-                f"S3 delete_object failed for key '{key}': {exc}"
-            ) from exc
+            raise StorageError(f"S3 delete_object failed for key '{key}': {exc}") from exc
 
     async def get_url(self, key: str, expires_in: int = 3600) -> str:
         """Generate a presigned download URL for *key*.
@@ -161,21 +148,17 @@ class S3StorageBackend(StorageBackend):
             )
             return url
         except ClientError as exc:
-            raise StorageError(
-                f"Failed to generate presigned URL for key '{key}': {exc}"
-            ) from exc
+            raise StorageError(f"Failed to generate presigned URL for key '{key}': {exc}") from exc
 
-    async def list_keys(self, prefix: str) -> List[str]:
+    async def list_keys(self, prefix: str) -> list[str]:
         """List object keys matching *prefix* in the bucket."""
         if prefix:
             validate_storage_key(prefix.rstrip("/") or "campaigns")
-        keys: List[str] = []
+        keys: list[str] = []
         try:
             async with self._session.client("s3", **self._client_kwargs()) as s3:
                 paginator = s3.get_paginator("list_objects_v2")
-                async for page in paginator.paginate(
-                    Bucket=self._bucket, Prefix=prefix
-                ):
+                async for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
                     for obj in page.get("Contents", []):
                         keys.append(obj["Key"])
             logger.debug(
@@ -186,6 +169,4 @@ class S3StorageBackend(StorageBackend):
             )
             return keys
         except ClientError as exc:
-            raise StorageError(
-                f"S3 list_objects failed for prefix '{prefix}': {exc}"
-            ) from exc
+            raise StorageError(f"S3 list_objects failed for prefix '{prefix}': {exc}") from exc

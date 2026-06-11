@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
 
-from sqlalchemy import select, func
+import structlog
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.db.models import GeneratedAsset
-from src.exceptions import NotFoundError
 
 logger = structlog.get_logger(__name__)
 
@@ -196,10 +193,6 @@ class AssetRepository:
         Returns:
             Integer count.
         """
-        stmt = (
-            select(func.count())
-            .select_from(GeneratedAsset)
-            .where(GeneratedAsset.campaign_id == campaign_id)
-        )
+        stmt = select(func.count()).select_from(GeneratedAsset).where(GeneratedAsset.campaign_id == campaign_id)
         result = await self._session.execute(stmt)
         return result.scalar_one()

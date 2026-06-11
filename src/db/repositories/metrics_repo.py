@@ -16,9 +16,9 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.db.models import CampaignMetric
 

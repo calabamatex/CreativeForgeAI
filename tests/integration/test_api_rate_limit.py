@@ -21,10 +21,8 @@ import pytest
 import pytest_asyncio
 from fastapi import Depends, FastAPI, Request
 from httpx import ASGITransport, AsyncClient
-
 from src.api.dependencies import check_rate_limit, get_db
 from src.api.errors import AppError, app_error_handler, generic_exception_handler
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -141,8 +139,10 @@ async def test_limit_shared_across_two_app_instances():
     transport_a = ASGITransport(app=app_a)
     transport_b = ASGITransport(app=app_b)
 
-    async with AsyncClient(transport=transport_a, base_url="http://test") as ca, \
-            AsyncClient(transport=transport_b, base_url="http://test") as cb:
+    async with (
+        AsyncClient(transport=transport_a, base_url="http://test") as ca,
+        AsyncClient(transport=transport_b, base_url="http://test") as cb,
+    ):
         # Alternate between the two instances; total allowed across BOTH is
         # `limit`, proving the counter is shared (not per-process).
         statuses = []

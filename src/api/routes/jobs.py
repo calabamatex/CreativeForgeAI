@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import math
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import structlog
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.api.dependencies import (
     check_rate_limit,
@@ -141,12 +141,10 @@ async def cancel_job(
         JobStatus.CANCELLED.value,
     }
     if job.status in terminal_states:
-        raise BadRequestError(
-            detail=f"Job is already in terminal state '{job.status}' and cannot be cancelled"
-        )
+        raise BadRequestError(detail=f"Job is already in terminal state '{job.status}' and cannot be cancelled")
 
     job.status = JobStatus.CANCELLED.value
-    job.completed_at = datetime.now(timezone.utc)
+    job.completed_at = datetime.now(UTC)
     await db.flush()
 
     logger.info("job.cancelled", job_id=str(job_id), user_id=str(user.id))

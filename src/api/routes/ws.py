@@ -43,9 +43,9 @@ import asyncio
 import os
 import uuid
 
+import structlog
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.api.dependencies import get_db, resolve_access_token_user
 from src.api.errors import AuthenticationError
@@ -81,6 +81,7 @@ async def _authenticate_ws(websocket: WebSocket, db: AsyncSession):
         raise AuthenticationError("Missing authentication token")
     return await resolve_access_token_user(token, db)
 
+
 # Terminal job states: once a job reaches one of these we emit it and close.
 TERMINAL_STATES: frozenset[str] = frozenset({"completed", "failed", "cancelled"})
 
@@ -106,6 +107,7 @@ def _poll_interval_seconds() -> float:
         return value if value > 0 else POLL_INTERVAL_SECONDS
     except ValueError:
         return POLL_INTERVAL_SECONDS
+
 
 # Hard cap on poll iterations so the loop can NEVER run forever (backpressure /
 # safety guard). 600 * 0.5s = 5 minutes of wall-clock before we force-close a
@@ -248,9 +250,7 @@ async def generation_progress(
             if job.status in TERMINAL_STATES:
                 # Terminal: we've already emitted this state above; close.
                 await websocket.close()
-                logger.info(
-                    "ws.closed.terminal", job_id=job_id, status=job.status
-                )
+                logger.info("ws.closed.terminal", job_id=job_id, status=job.status)
                 return
 
             await asyncio.sleep(poll_interval)

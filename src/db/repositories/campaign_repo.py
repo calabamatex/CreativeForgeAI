@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import Campaign
 from src.exceptions import NotFoundError
@@ -111,7 +111,7 @@ class CampaignRepository:
             if hasattr(campaign, key):
                 setattr(campaign, key, value)
 
-        campaign.updated_at = datetime.now(timezone.utc)
+        campaign.updated_at = datetime.now(UTC)
         await self._session.flush()
         logger.info("campaign.updated", pk=str(pk), fields=list(kwargs.keys()))
         return campaign
@@ -142,7 +142,7 @@ class CampaignRepository:
         campaign.status = status
         if result is not None:
             campaign.brief = {**campaign.brief, "result": result}
-        campaign.updated_at = datetime.now(timezone.utc)
+        campaign.updated_at = datetime.now(UTC)
         await self._session.flush()
         logger.info("campaign.status_updated", pk=str(pk), status=status)
         return campaign

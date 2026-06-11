@@ -5,12 +5,11 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.db.models import ComplianceReport
-from src.exceptions import NotFoundError
 
 logger = structlog.get_logger(__name__)
 
@@ -75,9 +74,7 @@ class ComplianceRepository:
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_by_campaign(
-        self, campaign_id: uuid.UUID
-    ) -> list[ComplianceReport]:
+    async def list_by_campaign(self, campaign_id: uuid.UUID) -> list[ComplianceReport]:
         """Return all compliance reports for a campaign.
 
         Args:

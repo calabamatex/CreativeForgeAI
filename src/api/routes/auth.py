@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import structlog
 from fastapi import APIRouter, Cookie, Depends, Header, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.api.dependencies import (
-    assert_not_revoked,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    REFRESH_TOKEN_EXPIRE_DAYS,
     check_rate_limit,
     create_access_token,
     create_refresh_token,
@@ -22,10 +23,7 @@ from src.api.dependencies import (
     hash_password,
     token_remaining_seconds,
     verify_password,
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-    REFRESH_TOKEN_EXPIRE_DAYS,
 )
-from src.cache import CacheUnavailable, get_cache
 from src.api.errors import (
     AuthenticationError,
     ConflictError,
@@ -39,6 +37,7 @@ from src.api.schemas import (
     TokenResponse,
     UserResponse,
 )
+from src.cache import CacheUnavailable, get_cache
 
 logger = structlog.get_logger(__name__)
 
@@ -143,7 +142,7 @@ async def register(
     if existing is not None:
         raise ConflictError(detail=f"Email '{body.email}' is already registered")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user = User(
         id=uuid.uuid4(),
         email=body.email,

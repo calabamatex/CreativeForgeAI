@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import math
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import structlog
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.api.dependencies import (
     check_rate_limit,
@@ -19,7 +19,6 @@ from src.api.dependencies import (
     require_role,
 )
 from src.api.errors import BadRequestError, NotFoundError
-from src.cache import get_cache
 from src.api.schemas import (
     CampaignCreateRequest,
     CampaignListItem,
@@ -32,6 +31,7 @@ from src.api.schemas import (
     PaginatedEnvelope,
     PaginationMeta,
 )
+from src.cache import get_cache
 
 logger = structlog.get_logger(__name__)
 
@@ -64,10 +64,7 @@ _CAMPAIGN_LIST_PREFIX = "campaigns:list:"
 
 def _list_cache_key(page: int, per_page: int, status: str | None, backend: str | None) -> str:
     """Build the cache key for a GET /campaigns list response."""
-    return (
-        f"{_CAMPAIGN_LIST_PREFIX}page={page}:per_page={per_page}"
-        f":status={status or '*'}:backend={backend or '*'}"
-    )
+    return f"{_CAMPAIGN_LIST_PREFIX}page={page}:per_page={per_page}:status={status or '*'}:backend={backend or '*'}"
 
 
 def _detail_cache_key(campaign_id) -> str:
@@ -98,14 +95,11 @@ async def _get_campaign_or_404(campaign_id: uuid.UUID, db: AsyncSession):
     Uses selectinload for the jobs relationship since it is commonly
     accessed right after fetching the campaign (e.g. latest_job lookup).
     """
-    from src.db.models import Campaign, Job  # noqa: E402
     from sqlalchemy.orm import selectinload  # noqa: E402
 
-    stmt = (
-        select(Campaign)
-        .where(Campaign.id == campaign_id)
-        .options(selectinload(Campaign.jobs))
-    )
+    from src.db.models import Campaign  # noqa: E402
+
+    stmt = select(Campaign).where(Campaign.id == campaign_id).options(selectinload(Campaign.jobs))
     result = await db.execute(stmt)
     campaign = result.scalar_one_or_none()
     if campaign is None:
@@ -124,12 +118,7 @@ async def _count_assets(campaign_id: uuid.UUID, db: AsyncSession) -> int:
 async def _latest_job(campaign_id: uuid.UUID, db: AsyncSession):
     from src.db.models import Job  # noqa: E402
 
-    stmt = (
-        select(Job)
-        .where(Job.campaign_id == campaign_id)
-        .order_by(Job.created_at.desc())
-        .limit(1)
-    )
+    stmt = select(Job).where(Job.campaign_id == campaign_id).order_by(Job.created_at.desc()).limit(1)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -178,8 +167,9 @@ async def list_campaigns(
     Uses a single query with a correlated subquery for asset counts
     to avoid N+1 query overhead.
     """
-    from src.db.models import Campaign, GeneratedAsset  # noqa: E402
     from sqlalchemy.orm import load_only  # noqa: E402
+
+    from src.db.models import Campaign, GeneratedAsset  # noqa: E402
 
     cache = get_cache()
     status_val = status.value if status else None
@@ -226,16 +216,18 @@ async def list_campaigns(
     # Single query: campaigns + asset count
     stmt = (
         select(Campaign, asset_count_subq)
-        .options(load_only(
-            Campaign.id,
-            Campaign.campaign_id,
-            Campaign.campaign_name,
-            Campaign.brand_name,
-            Campaign.status,
-            Campaign.image_backend,
-            Campaign.created_at,
-            Campaign.updated_at,
-        ))
+        .options(
+            load_only(
+                Campaign.id,
+                Campaign.campaign_id,
+                Campaign.campaign_name,
+                Campaign.brand_name,
+                Campaign.status,
+                Campaign.image_backend,
+                Campaign.created_at,
+                Campaign.updated_at,
+            )
+        )
         .order_by(Campaign.created_at.desc())
         .offset((page - 1) * per_page)
         .limit(per_page)
@@ -303,7 +295,7 @@ async def create_campaign(
     """Create a new campaign and queue a generation job."""
     from src.db.models import Campaign, Job  # noqa: E402
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     campaign = Campaign(
         id=uuid.uuid4(),
         campaign_id=body.campaign_id,
@@ -435,14 +427,12 @@ async def update_campaign(
     campaign = await _get_campaign_or_404(campaign_id, db)
 
     if campaign.status != CampaignStatus.DRAFT.value:
-        raise BadRequestError(
-            detail="Only campaigns in 'draft' status can be updated"
-        )
+        raise BadRequestError(detail="Only campaigns in 'draft' status can be updated")
 
     updates = body.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(campaign, field, value)
-    campaign.updated_at = datetime.now(timezone.utc)
+    campaign.updated_at = datetime.now(UTC)
 
     await db.flush()
 
@@ -508,14 +498,14 @@ async def reprocess_campaign(
     campaign = await _get_campaign_or_404(campaign_id, db)
 
     campaign.status = CampaignStatus.PROCESSING.value
-    campaign.updated_at = datetime.now(timezone.utc)
+    campaign.updated_at = datetime.now(UTC)
 
     job = Job(
         id=uuid.uuid4(),
         campaign_id=campaign.id,
         status="queued",
         progress_percent=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(job)
     await db.flush()

@@ -1,8 +1,9 @@
 """Integration tests for compliance endpoints."""
+
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,9 +14,8 @@ from tests.integration.conftest import (
     _make_campaign,
 )
 
-
 REPORT_ID = uuid.UUID("50000000-0000-0000-0000-000000000001")
-NOW = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 
 
 def _make_compliance_report(
@@ -168,18 +168,13 @@ class TestRunComplianceCheck:
         # API response reflects the real verdict.
         assert body["data"]["is_compliant"] is False
         violations = body["data"]["violations"]
-        assert any(
-            v["category"] == "prohibited_word" and v["violation"] == "guarantee"
-            for v in violations
-        ), violations
+        assert any(v["category"] == "prohibited_word" and v["violation"] == "guarantee" for v in violations), violations
 
         # A report row was persisted with is_compliant False.
         assert mock_db.add.called
         persisted = mock_db.add.call_args.args[0]
         assert persisted.is_compliant is False
-        assert any(
-            v["violation"] == "guarantee" for v in persisted.violations
-        )
+        assert any(v["violation"] == "guarantee" for v in persisted.violations)
 
     @pytest.mark.asyncio
     async def test_run_check_clean_campaign_is_compliant(self, authed_client):
@@ -203,9 +198,7 @@ class TestRunComplianceCheck:
         """A campaign with NO legal guidelines must yield an explicit
         'not checked' state -- is_compliant null, NOT compliant."""
         ac, mock_db = authed_client
-        campaign = _make_checkable_campaign(
-            headline="We guarantee results", legal_guidelines=None
-        )
+        campaign = _make_checkable_campaign(headline="We guarantee results", legal_guidelines=None)
 
         _db_returning_sequence(mock_db, campaign)
 

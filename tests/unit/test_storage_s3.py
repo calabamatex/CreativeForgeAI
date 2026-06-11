@@ -15,15 +15,13 @@ is required.  Tests cover:
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Dict, List
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from botocore.exceptions import ClientError
-
 from src.exceptions import StorageError
 from src.storage_s3 import S3StorageBackend
-
 
 # ---------------------------------------------------------------------------
 # Helpers for building mock S3 clients
@@ -51,7 +49,7 @@ class _MockBody:
 class _MockPaginator:
     """Mimics an aioboto3 paginator that yields pages asynchronously."""
 
-    def __init__(self, pages: List[Dict[str, Any]]) -> None:
+    def __init__(self, pages: list[dict[str, Any]]) -> None:
         self._pages = pages
 
     def paginate(self, **_kwargs) -> _MockPaginator:
@@ -61,7 +59,7 @@ class _MockPaginator:
         self._index = 0
         return self
 
-    async def __anext__(self) -> Dict[str, Any]:
+    async def __anext__(self) -> dict[str, Any]:
         if self._index >= len(self._pages):
             raise StopAsyncIteration
         page = self._pages[self._index]
@@ -323,9 +321,7 @@ class TestS3StorageBackendGetUrl:
     async def test_get_url_generates_presigned(self, s3_backend):
         """get_url() should call generate_presigned_url with correct params."""
         backend, mock_s3 = s3_backend
-        mock_s3.generate_presigned_url = AsyncMock(
-            return_value="https://s3.example.com/signed-url"
-        )
+        mock_s3.generate_presigned_url = AsyncMock(return_value="https://s3.example.com/signed-url")
 
         url = await backend.get_url("assets/img.png", expires_in=7200)
 
@@ -344,8 +340,10 @@ class TestS3StorageBackendGetUrl:
         await backend.get_url("key.png")
 
         call_kwargs = mock_s3.generate_presigned_url.call_args
-        assert call_kwargs.kwargs.get("ExpiresIn", call_kwargs[0][2] if len(call_kwargs[0]) > 2 else None) == 3600 or \
-            mock_s3.generate_presigned_url.call_args[1].get("ExpiresIn") == 3600
+        assert (
+            call_kwargs.kwargs.get("ExpiresIn", call_kwargs[0][2] if len(call_kwargs[0]) > 2 else None) == 3600
+            or mock_s3.generate_presigned_url.call_args[1].get("ExpiresIn") == 3600
+        )
 
     async def test_get_url_client_error_wraps(self, s3_backend):
         """A ClientError during URL generation should be wrapped."""
@@ -374,14 +372,16 @@ class TestS3StorageBackendListKeys:
         """list_keys should collect keys from a single page of results."""
         backend, mock_s3 = s3_backend
         mock_s3.get_paginator = MagicMock(
-            return_value=_MockPaginator([
-                {
-                    "Contents": [
-                        {"Key": "campaigns/a/img1.png"},
-                        {"Key": "campaigns/a/img2.png"},
-                    ]
-                }
-            ])
+            return_value=_MockPaginator(
+                [
+                    {
+                        "Contents": [
+                            {"Key": "campaigns/a/img1.png"},
+                            {"Key": "campaigns/a/img2.png"},
+                        ]
+                    }
+                ]
+            )
         )
 
         keys = await backend.list_keys("campaigns/a")
@@ -392,11 +392,13 @@ class TestS3StorageBackendListKeys:
         """list_keys should handle paginated results correctly."""
         backend, mock_s3 = s3_backend
         mock_s3.get_paginator = MagicMock(
-            return_value=_MockPaginator([
-                {"Contents": [{"Key": "a/1.png"}]},
-                {"Contents": [{"Key": "a/2.png"}]},
-                {"Contents": [{"Key": "a/3.png"}]},
-            ])
+            return_value=_MockPaginator(
+                [
+                    {"Contents": [{"Key": "a/1.png"}]},
+                    {"Contents": [{"Key": "a/2.png"}]},
+                    {"Contents": [{"Key": "a/3.png"}]},
+                ]
+            )
         )
 
         keys = await backend.list_keys("a")
@@ -407,9 +409,7 @@ class TestS3StorageBackendListKeys:
     async def test_list_keys_empty_result(self, s3_backend):
         """list_keys should return empty list when no objects match."""
         backend, mock_s3 = s3_backend
-        mock_s3.get_paginator = MagicMock(
-            return_value=_MockPaginator([{"Contents": []}])
-        )
+        mock_s3.get_paginator = MagicMock(return_value=_MockPaginator([{"Contents": []}]))
 
         keys = await backend.list_keys("nothing")
 
@@ -418,9 +418,7 @@ class TestS3StorageBackendListKeys:
     async def test_list_keys_page_without_contents(self, s3_backend):
         """list_keys should handle pages that have no Contents key."""
         backend, mock_s3 = s3_backend
-        mock_s3.get_paginator = MagicMock(
-            return_value=_MockPaginator([{}])
-        )
+        mock_s3.get_paginator = MagicMock(return_value=_MockPaginator([{}]))
 
         keys = await backend.list_keys("prefix")
 
@@ -429,8 +427,6 @@ class TestS3StorageBackendListKeys:
     async def test_list_keys_client_error_wraps(self, s3_backend):
         """A ClientError during list_objects should be wrapped."""
         backend, mock_s3 = s3_backend
-
-        paginator = MagicMock()
 
         class _ErrorPaginator:
             def paginate(self, **_kwargs):
@@ -451,9 +447,7 @@ class TestS3StorageBackendListKeys:
         """list_keys with empty prefix should still work."""
         backend, mock_s3 = s3_backend
         mock_s3.get_paginator = MagicMock(
-            return_value=_MockPaginator([
-                {"Contents": [{"Key": "file1.png"}, {"Key": "file2.png"}]}
-            ])
+            return_value=_MockPaginator([{"Contents": [{"Key": "file1.png"}, {"Key": "file2.png"}]}])
         )
 
         keys = await backend.list_keys("")
