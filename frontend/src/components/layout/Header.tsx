@@ -1,8 +1,10 @@
-import { useAuthStore } from "../../store/authStore";
+import { useAuth } from "../../hooks/useAuth";
 import { LogOut, User } from "lucide-react";
 
 export function Header() {
-  const { user, logout } = useAuthStore();
+  // Use the hook (not the raw store) so logout hits the server revocation
+  // endpoint (jti denylist) before clearing client state.
+  const { user, logout } = useAuth();
 
   return (
     <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">

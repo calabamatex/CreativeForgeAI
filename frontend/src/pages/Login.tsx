@@ -11,16 +11,17 @@ type FormData = z.infer<typeof schema>;
 
 export default function Login() {
   const [error, setError] = useState("");
-  const { setAuth } = useAuthStore();
+  const { setUser } = useAuthStore();
   const navigate = useNavigate();
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({ resolver: zodResolver(schema) });
 
   const onSubmit = async (data: FormData) => {
     setError("");
     try {
-      const res = await authApi.login(data);
+      // login sets the httpOnly cookies; /auth/me populates user state.
+      await authApi.login(data);
       const me = await authApi.me();
-      setAuth(me.data, res.data.access_token);
+      setUser(me.data);
       navigate("/");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Login failed");

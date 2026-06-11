@@ -1,14 +1,15 @@
 // ---------------------------------------------------------------------------
 // Auth Types
 //
-// NOTE: The auth/token model is owned by P5-T3. These shapes are intentionally
-// left as the existing hand-written ones; the server contract differs (see the
-// punch-list below) and reconciling it is deferred to T3:
-//   - UserResponse adds `is_active` and `updated_at` (both required); `role` is
-//     a plain string backed by the UserRole enum ("viewer" | "editor" | "admin").
-//   - TokenResponse additionally returns a required `refresh_token`; the server
-//     issues the refresh token in the body (RefreshRequest takes it back), not a
-//     cookie.
+// Token model (P5-T3): COOKIE-BASED. The backend sets the access AND refresh
+// tokens as httpOnly cookies; the browser never reads either. The frontend does
+// NOT store tokens (no localStorage) and does NOT send an Authorization header —
+// it relies on `credentials: "include"` so the cookies ride along.
+//
+// `TokenResponse` below is the login/refresh response BODY shape. The browser
+// ignores the token fields (they exist for non-browser API clients); only the
+// Set-Cookie headers matter for the SPA. The server also returns a
+// `refresh_token` field in the body, but a cookie client never uses it.
 // ---------------------------------------------------------------------------
 
 /** Server enum: UserRole. */
@@ -22,8 +23,13 @@ export interface User {
   created_at: string;
 }
 
+/**
+ * Login/refresh response body. The SPA ignores these token fields (auth is
+ * carried by httpOnly cookies); they are present for non-browser API clients.
+ */
 export interface TokenResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
   expires_in: number;
 }
