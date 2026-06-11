@@ -178,6 +178,16 @@ jobs:
       # `integration` e2e tests (Postgres/Redis/MinIO) DO run. The 78% floor sits
       # ~3.7pts below the measured 81.7% total so CI guards regressions without
       # flaking on small platform variance.
+      # P6-T3: guard the end-to-end regression test (the enqueue -> worker ->
+      # persist -> storage -> retrieve path that defined this codebase's original
+      # disconnect). Fail the gate if it is ever silently dropped from the default
+      # (non-paid) selection — e.g. accidentally marked `paid` or moved/renamed.
+      - name: Assert e2e regression test is in the gate
+        run: |
+          pytest tests/integration/test_e2e_campaign.py -m "not paid" --collect-only -q \
+            | grep -q "test_e2e_campaign_enqueue_persist_retrieve" \
+            || { echo "::error::e2e regression test is not in the default CI selection"; exit 1; }
+
       - name: Run tests with coverage
         run: |
           pytest -m "not paid" \
