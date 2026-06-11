@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -554,3 +554,187 @@ class TestEnqueueOnCreate:
         record = fake_arq_pool.jobs_for("process_campaign_job")[0]
         assert record.args == (campaign_db_id, job_db_id)
         assert record.job_id == job_db_id
+
+
+# ===================================================================
+# Read-through cache + invalidation (P3-T6)
+# ===================================================================
+#
+# These tests stand up a REAL RedisCache connected to the Compose Redis
+# (REDIS_URL, host port 6380) with a unique key prefix per test, and patch
+# ``src.api.routes.campaigns.get_cache`` to return it. The DB layer stays the
+# fully-mocked ``mock_db`` from ``authed_client`` so we can COUNT how many times
+# the route hits the DB: a second identical read must NOT touch the DB (served
+# from cache), and a mutation must invalidate so the DB is hit again.
+
+
+import os as _os
+
+import pytest_asyncio
+
+from src.cache import RedisCache
+
+
+@pytest_asyncio.fixture
+async def real_cache():
+    """A genuinely connected RedisCache (Compose Redis) with an isolated prefix.
+
+    Skips if Redis is unreachable so the suite still runs without the dev stack.
+    Flushes its own prefixed keys on teardown to avoid cross-test bleed.
+    """
+    url = _os.getenv("REDIS_URL", "redis://localhost:6380/0")
+    prefix = f"p3t6-test:{uuid.uuid4().hex[:8]}:"
+    cache = RedisCache(url=url, default_ttl=30, key_prefix=prefix)
+    await cache.connect()
+    if not cache.is_connected:
+        pytest.skip("Redis not reachable for cache test")
+    try:
+        yield cache
+    finally:
+        await cache.invalidate_pattern("*")
+        await cache.close()
+
+
+@pytest.mark.integration
+class TestCampaignReadCache:
+    """GET list/detail are read-through cached; mutations invalidate (P3-T6)."""
+
+    async def test_list_second_read_served_from_cache(self, authed_client, real_cache):
+        """Two identical list reads hit the DB only ONCE; the 2nd is a cache hit."""
+        from src.api.routes import campaigns as campaigns_route
+
+        ac, mock_db = authed_client
+        c1 = _make_campaign(campaign_id="C1", campaign_name="First")
+
+        # The list route issues 2 DB queries per uncached request: count + select.
+        # Provide exactly enough results for ONE uncached request; if the second
+        # request were to hit the DB it would raise StopAsyncIteration and fail.
+        _db_returning_sequence(mock_db, 1, [(c1, 0)])
+
+        with patch.object(campaigns_route, "get_cache", return_value=real_cache):
+            resp1 = await ac.get("/api/v1/campaigns?page=1&per_page=10")
+            assert resp1.status_code == 200
+            # DB was queried for the miss (count + select == 2 execute calls).
+            assert mock_db.execute.call_count == 2
+
+            # Prove a REAL cache entry now exists.
+            key = campaigns_route._list_cache_key(1, 10, None, None)
+            assert await real_cache.exists(key) is True
+
+            resp2 = await ac.get("/api/v1/campaigns?page=1&per_page=10")
+            assert resp2.status_code == 200
+            # No further DB queries: the second read was served from cache.
+            assert mock_db.execute.call_count == 2
+
+        # Identical data payload across both reads (meta differs by request_id).
+        assert resp1.json()["data"] == resp2.json()["data"]
+        assert resp2.json()["meta"]["total"] == 1
+
+    async def test_detail_second_read_served_from_cache(self, authed_client, real_cache):
+        """Two identical detail reads hit the DB only ONCE."""
+        from src.api.routes import campaigns as campaigns_route
+
+        ac, mock_db = authed_client
+        campaign = _make_campaign()
+        job = _make_job()
+
+        # Detail issues 3 queries on a miss: campaign lookup + count + latest job.
+        _db_returning_sequence(mock_db, campaign, 5, job)
+
+        with patch.object(campaigns_route, "get_cache", return_value=real_cache):
+            resp1 = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}")
+            assert resp1.status_code == 200
+            assert mock_db.execute.call_count == 3
+
+            assert await real_cache.exists(
+                campaigns_route._detail_cache_key(CAMPAIGN_ID)
+            ) is True
+
+            resp2 = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}")
+            assert resp2.status_code == 200
+            # Cache hit: no additional DB queries.
+            assert mock_db.execute.call_count == 3
+
+        assert resp1.json()["data"] == resp2.json()["data"]
+        assert resp2.json()["data"]["asset_count"] == 5
+
+    async def test_mutation_invalidates_list_cache(self, authed_client, real_cache):
+        """After a PATCH, the list cache is invalidated and the next read hits DB."""
+        from src.api.routes import campaigns as campaigns_route
+
+        ac, mock_db = authed_client
+        c1 = _make_campaign(status="draft", campaign_name="Before")
+        job = _make_job()
+
+        list_key = campaigns_route._list_cache_key(1, 10, None, None)
+
+        with patch.object(campaigns_route, "get_cache", return_value=real_cache):
+            # 1) Populate list cache (count + select).
+            _db_returning_sequence(mock_db, 1, [(c1, 0)])
+            r = await ac.get("/api/v1/campaigns?page=1&per_page=10")
+            assert r.status_code == 200
+            assert await real_cache.exists(list_key) is True
+
+            # 2) Mutate: PATCH the campaign (campaign lookup + count + latest job).
+            _db_returning_sequence(mock_db, c1, 0, job)
+            patch_resp = await ac.patch(
+                f"/api/v1/campaigns/{CAMPAIGN_ID}",
+                json={"campaign_name": "After"},
+                headers=admin_headers(),
+            )
+            assert patch_resp.status_code == 200
+
+            # 3) List cache must have been invalidated by the mutation.
+            assert await real_cache.exists(list_key) is False
+
+            # 4) Next list read therefore hits the DB again (count + select).
+            c1.campaign_name = "After"
+            _db_returning_sequence(mock_db, 1, [(c1, 0)])
+            r2 = await ac.get("/api/v1/campaigns?page=1&per_page=10")
+            assert r2.status_code == 200
+            assert r2.json()["data"][0]["campaign_name"] == "After"
+
+    async def test_mutation_invalidates_detail_cache(self, authed_client, real_cache):
+        """After a PATCH, the detail cache key for that campaign is invalidated."""
+        from src.api.routes import campaigns as campaigns_route
+
+        ac, mock_db = authed_client
+        campaign = _make_campaign(status="draft")
+        job = _make_job()
+        detail_key = campaigns_route._detail_cache_key(CAMPAIGN_ID)
+
+        with patch.object(campaigns_route, "get_cache", return_value=real_cache):
+            # Populate detail cache.
+            _db_returning_sequence(mock_db, campaign, 5, job)
+            r = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}")
+            assert r.status_code == 200
+            assert await real_cache.exists(detail_key) is True
+
+            # Mutate.
+            _db_returning_sequence(mock_db, campaign, 0, job)
+            patch_resp = await ac.patch(
+                f"/api/v1/campaigns/{CAMPAIGN_ID}",
+                json={"campaign_name": "Changed"},
+                headers=admin_headers(),
+            )
+            assert patch_resp.status_code == 200
+
+            # Detail key gone -> next read repopulates from DB.
+            assert await real_cache.exists(detail_key) is False
+
+    async def test_endpoints_work_with_cache_unavailable(self, authed_client):
+        """Safe-on-failure: with a DISCONNECTED cache the endpoints still serve."""
+        from src.api.routes import campaigns as campaigns_route
+
+        ac, mock_db = authed_client
+        c1 = _make_campaign()
+
+        # A RedisCache that was never connected -> every op no-ops (None/False).
+        down_cache = RedisCache(url="redis://127.0.0.1:1/0")
+        assert down_cache.is_connected is False
+
+        with patch.object(campaigns_route, "get_cache", return_value=down_cache):
+            _db_returning_sequence(mock_db, 1, [(c1, 0)])
+            resp = await ac.get("/api/v1/campaigns?page=1&per_page=10")
+            assert resp.status_code == 200
+            assert resp.json()["meta"]["total"] == 1
