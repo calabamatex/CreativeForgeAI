@@ -13,6 +13,7 @@ from tests.integration.conftest import (
     CAMPAIGN_ID,
     FakeScalarResult,
     _make_asset,
+    _make_campaign,
 )
 
 # ---------------------------------------------------------------------------
@@ -37,14 +38,13 @@ class TestListCampaignAssets:
     async def test_list_assets_success(self, authed_client):
         """Returns paginated asset list for an existing campaign."""
         ac, mock_db = authed_client
-        campaign_pk = CAMPAIGN_ID  # column value returned by the campaign-exists check
         asset = _make_asset()
 
         # Calls:
-        #  (1) _campaign_exists select(Campaign.id) -> campaign PK scalar
+        #  (1) get_owned_campaign select(Campaign) -> Campaign row (tenant gate)
         #  (2) count query -> total
         #  (3) select assets -> list
-        _db_returning_sequence(mock_db, campaign_pk, 1, [asset])
+        _db_returning_sequence(mock_db, _make_campaign(), 1, [asset])
 
         resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/assets")
 
@@ -58,7 +58,7 @@ class TestListCampaignAssets:
         """An empty assets list returns valid paginated response."""
         ac, mock_db = authed_client
 
-        _db_returning_sequence(mock_db, CAMPAIGN_ID, 0, [])
+        _db_returning_sequence(mock_db, _make_campaign(), 0, [])
 
         resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/assets")
 
@@ -81,7 +81,7 @@ class TestListCampaignAssets:
         ac, mock_db = authed_client
         asset = _make_asset()
 
-        _db_returning_sequence(mock_db, CAMPAIGN_ID, 1, [asset])
+        _db_returning_sequence(mock_db, _make_campaign(), 1, [asset])
 
         resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?locale=en-US")
 
@@ -93,7 +93,7 @@ class TestListCampaignAssets:
         ac, mock_db = authed_client
         asset = _make_asset()
 
-        _db_returning_sequence(mock_db, CAMPAIGN_ID, 1, [asset])
+        _db_returning_sequence(mock_db, _make_campaign(), 1, [asset])
 
         resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?aspect_ratio=1:1")
 
@@ -104,7 +104,7 @@ class TestListCampaignAssets:
         ac, mock_db = authed_client
         asset = _make_asset()
 
-        _db_returning_sequence(mock_db, CAMPAIGN_ID, 1, [asset])
+        _db_returning_sequence(mock_db, _make_campaign(), 1, [asset])
 
         resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?generation_method=firefly")
 
@@ -114,7 +114,7 @@ class TestListCampaignAssets:
         """Custom page and per_page are reflected in meta."""
         ac, mock_db = authed_client
 
-        _db_returning_sequence(mock_db, CAMPAIGN_ID, 50, [])
+        _db_returning_sequence(mock_db, _make_campaign(), 50, [])
 
         resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/assets?page=3&per_page=5")
 

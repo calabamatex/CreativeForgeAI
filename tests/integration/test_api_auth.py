@@ -84,7 +84,8 @@ class TestRegister:
         )
 
         assert resp.status_code == 409
-        assert "already registered" in resp.json()["detail"]
+        # Generic message: must NOT echo the email back (user enumeration).
+        assert "dup@example.com" not in resp.json()["detail"]
 
     async def test_register_invalid_email(self, client, mock_db):
         """An invalid email address triggers 422 validation error."""

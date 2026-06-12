@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.authz import get_owned_asset, get_owned_campaign
 from src.api.dependencies import check_rate_limit, get_current_user, get_db
 from src.api.errors import NotFoundError
 from src.api.schemas import (
@@ -27,31 +28,6 @@ from src.storage_local import LocalStorageBackend
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["assets"])
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-async def _get_asset_or_404(asset_id: uuid.UUID, db: AsyncSession):
-    from src.db.models import GeneratedAsset  # noqa: E402
-
-    stmt = select(GeneratedAsset).where(GeneratedAsset.id == asset_id)
-    result = await db.execute(stmt)
-    asset = result.scalar_one_or_none()
-    if asset is None:
-        raise NotFoundError("Asset", str(asset_id))
-    return asset
-
-
-async def _campaign_exists(campaign_id: uuid.UUID, db: AsyncSession) -> None:
-    from src.db.models import Campaign  # noqa: E402
-
-    stmt = select(Campaign.id).where(Campaign.id == campaign_id)
-    result = await db.execute(stmt)
-    if result.scalar_one_or_none() is None:
-        raise NotFoundError("Campaign", str(campaign_id))
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +53,9 @@ async def list_campaign_assets(
     """List assets belonging to a campaign, with optional filtering."""
     from src.db.models import GeneratedAsset  # noqa: E402
 
-    await _campaign_exists(campaign_id, db)
+    # Tenant gate: 404 unless the caller owns the parent campaign (or is
+    # admin). The asset query below is already scoped to this campaign_id.
+    await get_owned_campaign(campaign_id, user, db)
 
     base = select(GeneratedAsset).where(GeneratedAsset.campaign_id == campaign_id)
     count_q = select(func.count()).select_from(GeneratedAsset).where(GeneratedAsset.campaign_id == campaign_id)
@@ -128,7 +106,7 @@ async def get_asset(
     db: AsyncSession = Depends(get_db),
 ):
     """Return metadata for a single asset."""
-    asset = await _get_asset_or_404(asset_id, db)
+    asset = await get_owned_asset(asset_id, user, db)
     return Envelope[AssetResponse](
         data=AssetResponse.model_validate(asset),
         meta=Meta(),
@@ -154,7 +132,7 @@ async def download_asset(
     For local storage this streams the file via ``FileResponse``.
     For S3 storage this redirects to a presigned URL.
     """
-    asset = await _get_asset_or_404(asset_id, db)
+    asset = await get_owned_asset(asset_id, user, db)
     backend = get_default_storage_backend()
 
     # The storage key is the single source of truth for where the bytes live

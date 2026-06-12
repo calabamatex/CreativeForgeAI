@@ -361,7 +361,7 @@ class TestDeleteCampaign:
 # ===================================================================
 
 
-async def _seed_editor_and_headers(session) -> dict[str, str]:
+async def _seed_editor_and_headers(session) -> tuple[dict[str, str], object]:
     """Seed a real editor user in the test DB and return a real Bearer header.
 
     Mirrors the e2e test's approach (direct seed + mint, dodging the known
@@ -387,7 +387,7 @@ async def _seed_editor_and_headers(session) -> dict[str, str]:
     await session.flush()
 
     token = create_access_token(str(user.id), user.role)
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {token}"}, user.id
 
 
 @pytest.mark.integration
@@ -402,7 +402,7 @@ class TestEnqueueOnCreate:
         from src.db.models import Job
 
         client, session = real_app_client
-        headers = await _seed_editor_and_headers(session)
+        headers, _editor_id = await _seed_editor_and_headers(session)
 
         app = client._transport.app
 
@@ -452,7 +452,7 @@ class TestEnqueueOnCreate:
         from src.api.dependencies import get_arq_pool
 
         client, session = real_app_client
-        headers = await _seed_editor_and_headers(session)
+        headers, _editor_id = await _seed_editor_and_headers(session)
 
         app = client._transport.app
 
@@ -500,9 +500,10 @@ class TestEnqueueOnCreate:
         from src.db.models import Campaign
 
         client, session = real_app_client
-        headers = await _seed_editor_and_headers(session)
+        headers, editor_id = await _seed_editor_and_headers(session)
 
-        # Seed a campaign directly so we can reprocess it.
+        # Seed a campaign directly so we can reprocess it. It must be OWNED by
+        # the editor: tenant scoping 404s non-owned (incl. NULL-owned) objects.
         campaign = Campaign(
             id=_uuid.uuid4(),
             campaign_id=f"RP-{_uuid.uuid4().hex[:8]}",
@@ -513,6 +514,7 @@ class TestEnqueueOnCreate:
             brief={"headline": "Go"},
             target_locales=["en-US"],
             aspect_ratios=["1:1"],
+            created_by=editor_id,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
@@ -602,7 +604,7 @@ class TestCampaignReadCache:
             assert mock_db.execute.call_count == 2
 
             # Prove a REAL cache entry now exists.
-            key = campaigns_route._list_cache_key(1, 10, None, None)
+            key = campaigns_route._list_cache_key("*", 1, 10, None, None)
             assert await real_cache.exists(key) is True
 
             resp2 = await ac.get("/api/v1/campaigns?page=1&per_page=10")
@@ -648,7 +650,7 @@ class TestCampaignReadCache:
         c1 = _make_campaign(status="draft", campaign_name="Before")
         job = _make_job()
 
-        list_key = campaigns_route._list_cache_key(1, 10, None, None)
+        list_key = campaigns_route._list_cache_key("*", 1, 10, None, None)
 
         with patch.object(campaigns_route, "get_cache", return_value=real_cache):
             # 1) Populate list cache (count + select).
