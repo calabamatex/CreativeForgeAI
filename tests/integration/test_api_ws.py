@@ -45,14 +45,14 @@ class _ASGIWebSocketClient:
     as a background task; ``send``/``receive`` queues bridge the two sides.
     """
 
-    def __init__(self, app, path: str):
+    def __init__(self, app, path: str, query_string: bytes = b""):
         self._app = app
         self._scope = {
             "type": "websocket",
             "path": path,
             "raw_path": path.encode(),
             "headers": [],
-            "query_string": b"",
+            "query_string": query_string,
             "subprotocols": [],
             "client": ("testclient", 50000),
             "server": ("testserver", 80),
@@ -126,8 +126,14 @@ class _WSClosed(Exception):
 # ---------------------------------------------------------------------------
 
 
-async def _seed_campaign_and_job(session, *, status: str = "queued") -> tuple[str, str]:
-    """Insert a minimal campaign + job; return ``(campaign_id, job_id)`` strs."""
+async def _seed_campaign_and_job(
+    session, *, status: str = "queued"
+) -> tuple[str, str, uuid.UUID]:
+    """Insert a minimal campaign + job.
+
+    Returns ``(campaign_id, job_id, owner_id)`` where ``owner_id`` is the
+    campaign's ``created_by`` (the user authorized to stream the job).
+    """
     creator_id = uuid.uuid4()
 
     from src.db.models import User
@@ -170,7 +176,19 @@ async def _seed_campaign_and_job(session, *, status: str = "queued") -> tuple[st
     session.add(job)
     await session.flush()
 
-    return str(campaign.id), str(job.id)
+    return str(campaign.id), str(job.id), creator_id
+
+
+def _owner_token(owner_id: uuid.UUID, role: str = "editor") -> str:
+    """Mint an access token for the job's owner."""
+    from src.api.dependencies import create_access_token
+
+    return create_access_token(str(owner_id), role)
+
+
+def _ws_query(token: str) -> bytes:
+    """Build a ``?token=...`` query string for the WS handshake scope."""
+    return f"token={token}".encode()
 
 
 def _make_app(real_db_session):
@@ -204,12 +222,13 @@ async def test_ws_streams_real_progress_then_closes_on_terminal(real_db_session)
     the socket CLOSES.
     """
     session = real_db_session
-    campaign_id, job_id = await _seed_campaign_and_job(session, status="queued")
+    campaign_id, job_id, owner_id = await _seed_campaign_and_job(session, status="queued")
 
     from src.db.repositories import JobRepository
 
     repo = JobRepository(session)
     app = _make_app(session)
+    token = _owner_token(owner_id)
 
     received: list[dict] = []
 
@@ -226,7 +245,9 @@ async def test_ws_streams_real_progress_then_closes_on_terminal(real_db_session)
         await repo.complete(uuid.UUID(job_id), result={"ok": True})
         await session.commit()
 
-    async with _ASGIWebSocketClient(app, WS_PATH_TEMPLATE.format(job_id=job_id)) as ws:
+    async with _ASGIWebSocketClient(
+        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
+    ) as ws:
         advancer = asyncio.ensure_future(_advance())
         try:
             while True:
@@ -267,7 +288,7 @@ async def test_ws_streams_real_progress_then_closes_on_terminal(real_db_session)
 async def test_ws_already_terminal_sends_state_once_and_closes(real_db_session):
     """A job already ``failed`` at connect → one terminal frame, then close."""
     session = real_db_session
-    campaign_id, job_id = await _seed_campaign_and_job(session, status="queued")
+    campaign_id, job_id, owner_id = await _seed_campaign_and_job(session, status="queued")
 
     from src.db.repositories import JobRepository
 
@@ -276,8 +297,11 @@ async def test_ws_already_terminal_sends_state_once_and_closes(real_db_session):
     await session.commit()
 
     app = _make_app(session)
+    token = _owner_token(owner_id)
 
-    async with _ASGIWebSocketClient(app, WS_PATH_TEMPLATE.format(job_id=job_id)) as ws:
+    async with _ASGIWebSocketClient(
+        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
+    ) as ws:
         msg = await ws.receive_json(timeout=5)
         assert msg["type"] == "progress"
         assert msg["status"] == "failed"
@@ -290,16 +314,203 @@ async def test_ws_already_terminal_sends_state_once_and_closes(real_db_session):
 async def test_ws_unknown_job_sends_error_and_closes(real_db_session):
     """A nonexistent job id → terminal error frame, then close (no hang)."""
     session = real_db_session
+    # Seed a real user so the handshake authenticates; then connect to a job id
+    # that does not exist so the post-auth lookup yields not_found.
+    _c, _j, owner_id = await _seed_campaign_and_job(session, status="queued")
     app = _make_app(session)
+    token = _owner_token(owner_id)
     missing_job_id = str(uuid.uuid4())
 
     async with _ASGIWebSocketClient(
-        app, WS_PATH_TEMPLATE.format(job_id=missing_job_id)
+        app, WS_PATH_TEMPLATE.format(job_id=missing_job_id), query_string=_ws_query(token)
     ) as ws:
         msg = await ws.receive_json(timeout=5)
         assert msg["type"] == "error"
         assert msg["status"] == "not_found"
         assert msg["job_id"] == missing_job_id
+        await ws.expect_close(timeout=5)
+
+    assert ws.closed is True
+
+
+# ---------------------------------------------------------------------------
+# WebSocket authentication + authorization  (P4-T1)
+# ---------------------------------------------------------------------------
+
+
+async def test_ws_rejects_missing_token(real_db_session):
+    """No ``?token=`` and no cookie → unauthorized error + close 4401."""
+    session = real_db_session
+    _c, job_id, _owner = await _seed_campaign_and_job(session, status="queued")
+    app = _make_app(session)
+
+    from src.api.routes.ws import WS_CLOSE_UNAUTHENTICATED
+
+    async with _ASGIWebSocketClient(
+        app, WS_PATH_TEMPLATE.format(job_id=job_id)
+    ) as ws:
+        msg = await ws.receive_json(timeout=5)
+        assert msg["type"] == "error"
+        assert msg["status"] == "unauthorized"
+        await ws.expect_close(timeout=5)
+
+    assert ws.closed is True
+    assert ws.close_code == WS_CLOSE_UNAUTHENTICATED
+
+
+async def test_ws_rejects_invalid_token(real_db_session):
+    """A malformed/garbage token → unauthorized + close 4401 (no streaming)."""
+    session = real_db_session
+    _c, job_id, _owner = await _seed_campaign_and_job(session, status="queued")
+    app = _make_app(session)
+
+    from src.api.routes.ws import WS_CLOSE_UNAUTHENTICATED
+
+    async with _ASGIWebSocketClient(
+        app,
+        WS_PATH_TEMPLATE.format(job_id=job_id),
+        query_string=_ws_query("definitely.not.a.valid.jwt"),
+    ) as ws:
+        msg = await ws.receive_json(timeout=5)
+        assert msg["type"] == "error"
+        assert msg["status"] == "unauthorized"
+        await ws.expect_close(timeout=5)
+
+    assert ws.closed is True
+    assert ws.close_code == WS_CLOSE_UNAUTHENTICATED
+
+
+async def test_ws_rejects_revoked_token(real_db_session):
+    """A revoked (denylisted) token → unauthorized + close 4401."""
+    session = real_db_session
+    _c, job_id, owner_id = await _seed_campaign_and_job(session, status="queued")
+    app = _make_app(session)
+    token = _owner_token(owner_id)
+
+    # Revoke the token by denylisting its jti (as /auth/logout would).
+    from src.cache import get_cache
+    from jose import jwt as _jwt
+
+    jti = _jwt.get_unverified_claims(token)["jti"]
+    await get_cache().connect()
+    await get_cache().denylist_jti(jti, 300)
+
+    from src.api.routes.ws import WS_CLOSE_UNAUTHENTICATED
+
+    async with _ASGIWebSocketClient(
+        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
+    ) as ws:
+        msg = await ws.receive_json(timeout=5)
+        assert msg["type"] == "error"
+        assert msg["status"] == "unauthorized"
+        await ws.expect_close(timeout=5)
+
+    assert ws.closed is True
+    assert ws.close_code == WS_CLOSE_UNAUTHENTICATED
+
+
+async def test_ws_owner_can_stream(real_db_session):
+    """A valid token for a job you OWN streams the terminal state and closes."""
+    session = real_db_session
+    _c, job_id, owner_id = await _seed_campaign_and_job(session, status="queued")
+
+    from src.db.repositories import JobRepository
+
+    repo = JobRepository(session)
+    await repo.complete(uuid.UUID(job_id), result={"ok": True})
+    await session.commit()
+
+    app = _make_app(session)
+    token = _owner_token(owner_id)
+
+    async with _ASGIWebSocketClient(
+        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
+    ) as ws:
+        msg = await ws.receive_json(timeout=5)
+        assert msg["type"] == "progress"
+        assert msg["status"] == "completed"
+        assert msg["job_id"] == job_id
+        await ws.expect_close(timeout=5)
+
+    assert ws.closed is True
+
+
+async def test_ws_rejects_non_owner(real_db_session):
+    """A valid token for a DIFFERENT user → forbidden + close 4403 (no stream)."""
+    session = real_db_session
+    _c, job_id, _owner_id = await _seed_campaign_and_job(session, status="queued")
+
+    # Seed a SECOND, unrelated user and authenticate as them.
+    from src.db.models import User
+    from datetime import datetime, timezone
+
+    other_id = uuid.uuid4()
+    other = User(
+        id=other_id,
+        email=f"other-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="$2b$12$placeholder.hash.value.unused",
+        display_name="Other User",
+        role="editor",
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    session.add(other)
+    await session.flush()
+
+    app = _make_app(session)
+    token = _owner_token(other_id)
+
+    from src.api.routes.ws import WS_CLOSE_FORBIDDEN
+
+    async with _ASGIWebSocketClient(
+        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
+    ) as ws:
+        msg = await ws.receive_json(timeout=5)
+        assert msg["type"] == "error"
+        assert msg["status"] == "forbidden"
+        await ws.expect_close(timeout=5)
+
+    assert ws.closed is True
+    assert ws.close_code == WS_CLOSE_FORBIDDEN
+
+
+async def test_ws_admin_can_stream_any_job(real_db_session):
+    """An admin token streams a job owned by someone else (admin override)."""
+    session = real_db_session
+    _c, job_id, _owner_id = await _seed_campaign_and_job(session, status="queued")
+
+    from src.db.models import User
+    from datetime import datetime, timezone
+
+    admin_id = uuid.uuid4()
+    admin = User(
+        id=admin_id,
+        email=f"admin-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="$2b$12$placeholder.hash.value.unused",
+        display_name="Admin User",
+        role="admin",
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    session.add(admin)
+    await session.flush()
+
+    from src.db.repositories import JobRepository
+
+    await JobRepository(session).complete(uuid.UUID(job_id), result={"ok": True})
+    await session.commit()
+
+    app = _make_app(session)
+    token = _owner_token(admin_id, role="admin")
+
+    async with _ASGIWebSocketClient(
+        app, WS_PATH_TEMPLATE.format(job_id=job_id), query_string=_ws_query(token)
+    ) as ws:
+        msg = await ws.receive_json(timeout=5)
+        assert msg["type"] == "progress"
+        assert msg["status"] == "completed"
         await ws.expect_close(timeout=5)
 
     assert ws.closed is True

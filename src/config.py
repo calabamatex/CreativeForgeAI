@@ -64,6 +64,30 @@ class Config:
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
         # ---------------------------------------------------------------
+        # Trusted-proxy handling for client-IP derivation (rate limiting).
+        #
+        # ``X-Forwarded-For`` is client-controllable and trivially spoofable,
+        # so we IGNORE it by default and key IP-based rate limits on the socket
+        # peer (``request.client.host``). Set TRUST_FORWARDED_FOR=true ONLY when
+        # the app sits behind a trusted reverse proxy/load balancer that
+        # rewrites XFF. When trusted, the client IP is the RIGHT-MOST address in
+        # the XFF chain that is NOT itself a configured trusted proxy (the
+        # closest untrusted hop), which a spoofer cannot influence because the
+        # trusted proxy appends the real peer to the right.
+        #
+        # TRUSTED_PROXIES is a comma-separated allowlist of proxy IPs (the
+        # socket peers we accept XFF from / strip from the right of the chain).
+        # ---------------------------------------------------------------
+        self.TRUST_FORWARDED_FOR: bool = (
+            os.getenv("TRUST_FORWARDED_FOR", "false").lower() == "true"
+        )
+        self.TRUSTED_PROXIES: set[str] = {
+            p.strip()
+            for p in os.getenv("TRUSTED_PROXIES", "").split(",")
+            if p.strip()
+        }
+
+        # ---------------------------------------------------------------
         # Image-generation cost model (per generated image, USD).
         #
         # These are the documented public list prices for a single

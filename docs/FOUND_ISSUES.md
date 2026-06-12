@@ -59,7 +59,10 @@ making all 13 datetime columns `DateTime(timezone=True)` + Alembic migration
 `da96efc5089e`. `src/db/models.py`,
 `src/db/migrations/versions/da96efc5089e_tz_aware_timestamp_columns.py`.
 
-### passlib 1.7.4 + bcrypt 5.0.0 incompatible — auth register/login broken — DEFERRED to P4
+### passlib 1.7.4 + bcrypt 5.0.0 incompatible — auth register/login broken — FIXED in P4-T0
+**FIXED (P4-T0):** Replaced passlib with the `bcrypt` library directly in `src/api/dependencies.py` (`hash_password`/`verify_password`, cost 12); passwords are SHA-256+base64 pre-hashed before bcrypt to sidestep the 72-byte limit without truncating; `verify_password` returns `False` on malformed hashes. Dropped `passlib[bcrypt]` from `pyproject.toml` (now `bcrypt>=4.1.0`) and uninstalled passlib from the venv. Stored hashes remain standard `$2b$`; auth tests + full integration suite green.
+
+
 `passlib[bcrypt]>=1.7.4` resolved passlib 1.7.4 with bcrypt 5.0.0, which removed the
 `__about__` attribute passlib reads and trips passlib's backend 72-byte self-test
 (`ValueError: password cannot be longer than 72 bytes`). Result: `hash_password` /
@@ -121,12 +124,17 @@ Deferred (expected under option (a)): report & brief JSON are still written by
 `StorageManager` to local disk — that is by design (reports/briefs, NOT assets),
 and the intermediate hero-image cache likewise stays local.
 
-### WebSocket `/ws/generation/{job_id}` has no authentication — DEFERRED to P4
-`src/api/routes/ws.py` accepts any connection for a given `job_id` and streams that
-job's progress with no auth check (matches the prior heartbeat implementation,
-which also had none). A client who knows/guesses a job UUID can observe its
-progress. Out of scope for P3-T4 (real progress streaming); belongs to P4 security
-hardening (auth the WS handshake + authorize the job's owner). `src/api/routes/ws.py`.
+### WebSocket `/ws/generation/{job_id}` has no authentication — FIXED in P4-T1
+**FIXED (P4-T1):** `src/api/routes/ws.py` now authenticates the handshake. The
+access token is accepted via the `?token=` query param (browsers can't set
+`Authorization` on a WS) or the `access_token` httpOnly cookie, and validated with
+the SAME decode + revocation-denylist + active-user checks as HTTP
+(`resolve_access_token_user`). Unauthenticated/invalid/revoked tokens are closed
+with **4401** before any progress is streamed. After auth, the connection is
+authorized against ownership: a job's owner is its parent campaign's `created_by`;
+a non-owner (and non-admin) is closed with **4403**. Admins may stream any job.
+Covered by `tests/integration/test_api_ws.py` (missing/invalid/revoked token,
+owner streams, non-owner 4403, admin override).
 
 ### P3-T4 WebSocket test is timing-flaky — DEFERRED to P6
 `tests/integration/test_api_ws.py::test_ws_streams_real_progress_then_closes_on_terminal`

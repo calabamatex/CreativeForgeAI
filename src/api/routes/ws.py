@@ -46,12 +46,39 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
-from src.api.dependencies import get_db
-from src.db.repositories import JobRepository
+from src.api.dependencies import get_db, resolve_access_token_user
+from src.api.errors import AuthenticationError
+from src.db.repositories import CampaignRepository, JobRepository
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+# WebSocket close codes (application range 4000-4999, mirroring HTTP semantics):
+#   4401 -> unauthenticated / invalid-or-revoked token   (cf. HTTP 401)
+#   4403 -> authenticated but not authorized for this job (cf. HTTP 403)
+WS_CLOSE_UNAUTHENTICATED: int = 4401
+WS_CLOSE_FORBIDDEN: int = 4403
+
+
+async def _authenticate_ws(websocket: WebSocket, db: AsyncSession):
+    """Authenticate a WS handshake from a ``?token=`` query param or cookie.
+
+    Browsers cannot set ``Authorization`` headers on a WebSocket, so the access
+    token is accepted via the ``token`` query parameter OR the ``access_token``
+    httpOnly cookie. It is validated with the SAME decode + revocation-denylist
+    + active-user checks as HTTP requests (``resolve_access_token_user``).
+
+    Returns the authenticated ``User`` on success; returns ``None`` (after the
+    caller is responsible for closing) is NOT used — instead this raises
+    ``AuthenticationError`` so the caller closes with ``WS_CLOSE_UNAUTHENTICATED``.
+    """
+    token = websocket.query_params.get("token")
+    if not token:
+        token = websocket.cookies.get("access_token")
+    if not token:
+        raise AuthenticationError("Missing authentication token")
+    return await resolve_access_token_user(token, db)
 
 # Terminal job states: once a job reaches one of these we emit it and close.
 TERMINAL_STATES: frozenset[str] = frozenset({"completed", "failed", "cancelled"})
@@ -93,6 +120,23 @@ async def generation_progress(
     await websocket.accept()
     logger.info("ws.connected", job_id=job_id)
 
+    # --- AUTHENTICATE the handshake (P4-T1) -------------------------------
+    # An unauthenticated or invalid/revoked token must NOT stream any progress.
+    try:
+        user = await _authenticate_ws(websocket, db)
+    except AuthenticationError as exc:
+        await websocket.send_json(
+            {
+                "type": "error",
+                "job_id": job_id,
+                "status": "unauthorized",
+                "message": "Authentication required",
+            }
+        )
+        await websocket.close(code=WS_CLOSE_UNAUTHENTICATED)
+        logger.info("ws.closed.unauthenticated", job_id=job_id, reason=str(exc))
+        return
+
     # Validate the job id up front: a non-UUID can never match a row, so treat
     # it like an unknown job (terminal error + close) rather than letting the
     # query raise.
@@ -112,6 +156,46 @@ async def generation_progress(
         return
 
     job_repo = JobRepository(db)
+
+    # --- AUTHORIZE: the user must OWN the job's campaign (or be admin) -----
+    # Jobs have no direct owner column; ownership is the parent campaign's
+    # ``created_by``. Admins may observe any job. We resolve the job + campaign
+    # before streaming and close 4403 on a mismatch so a client cannot probe
+    # another user's job progress by guessing a UUID.
+    job = await job_repo.get_by_id(job_uuid)
+    if job is None:
+        await websocket.send_json(
+            {
+                "type": "error",
+                "job_id": job_id,
+                "status": "not_found",
+                "message": "Job not found",
+            }
+        )
+        await websocket.close()
+        logger.info("ws.closed.not_found", job_id=job_id)
+        return
+
+    if getattr(user, "role", None) != "admin":
+        campaign = await CampaignRepository(db).get_by_id(job.campaign_id)
+        owner_id = getattr(campaign, "created_by", None) if campaign else None
+        if owner_id is None or owner_id != user.id:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "job_id": job_id,
+                    "status": "forbidden",
+                    "message": "Not authorized for this job",
+                }
+            )
+            await websocket.close(code=WS_CLOSE_FORBIDDEN)
+            logger.info(
+                "ws.closed.forbidden",
+                job_id=job_id,
+                user_id=str(user.id),
+            )
+            return
+
     last_signature: tuple | None = None
 
     try:
