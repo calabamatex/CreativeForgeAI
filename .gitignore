@@ -125,3 +125,6 @@ examples/*_20*T*.json
 .swarm/
 .claude/
 .mcp.json
+
+# TypeScript incremental build state (build artifact; do not commit)
+*.tsbuildinfo
