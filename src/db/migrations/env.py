@@ -34,11 +34,15 @@ if config.config_file_name is not None:
 # Model metadata for 'autogenerate' support
 target_metadata = Base.metadata
 
-# Override sqlalchemy.url from environment variable
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://genai:genai_dev@localhost:5432/genai_platform",
-)
+# Override sqlalchemy.url from the environment. No hardcoded credentials:
+# the DATABASE_URL must be provided by the environment (the app, CI, or the
+# operator running migrations).
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is not set. "
+        "Alembic migrations require an explicit database URL."
+    )
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 

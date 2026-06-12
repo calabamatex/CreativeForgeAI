@@ -1,6 +1,7 @@
 """SQLAlchemy async engine, session factory, and declarative base."""
 
 import os
+from pathlib import Path
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -15,9 +16,14 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
+# Default targets the local Docker Compose Postgres service (see
+# docker-compose.yml). Its host port is remapped 5432 -> 5434 to avoid a
+# collision with another local stack on :5432 (see docs/FOUND_ISSUES.md), so
+# the default uses 5434 / the Compose-provisioned db, user and password. These
+# are non-secret local-dev credentials; production MUST set DATABASE_URL.
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/adobe_genai",
+    "postgresql+asyncpg://genai:genai_dev@localhost:5434/genai_platform",
 )
 
 
@@ -57,11 +63,45 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+# Project root (…/CreativeForgeAI) and the alembic.ini that lives there.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_ALEMBIC_INI = _PROJECT_ROOT / "alembic.ini"
+
+
+def _run_alembic_upgrade() -> None:
+    """Run ``alembic upgrade head`` synchronously.
+
+    Migrations are the single source of truth for the schema. We invoke
+    Alembic programmatically (rather than relying on ``Base.metadata.create_all``)
+    so application startup applies the exact, version-controlled migration
+    history. ``env.py`` reads ``DATABASE_URL`` from the environment, so the
+    upgrade targets the same database this module is configured against.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(_ALEMBIC_INI))
+    # Make script_location absolute so the upgrade works regardless of CWD.
+    cfg.set_main_option(
+        "script_location", str(_PROJECT_ROOT / "src" / "db" / "migrations")
+    )
+    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+    command.upgrade(cfg, "head")
+
+
 async def init_db() -> None:
-    """Create all tables defined on Base.metadata."""
-    logger.info("db.init", url=DATABASE_URL)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Apply database migrations (``alembic upgrade head``) at startup.
+
+    Note: migrations are the schema source of truth. We deliberately do NOT
+    use ``Base.metadata.create_all`` here — see ``_run_alembic_upgrade``.
+    Alembic's ``command.upgrade`` is synchronous and drives its own (sync)
+    engine via ``env.py``, so we run it in a worker thread to avoid blocking
+    the event loop.
+    """
+    import asyncio
+
+    logger.info("db.init.migrate", url=DATABASE_URL)
+    await asyncio.to_thread(_run_alembic_upgrade)
     logger.info("db.init.complete")
 
 

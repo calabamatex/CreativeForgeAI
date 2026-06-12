@@ -328,7 +328,7 @@ Example logo files for testing logo placement feature.
 - `README.md` - Project overview
 - `ARCHITECTURE.md` - System design
 - `FEATURES.md` - Feature matrix
-- `QUICK_START.md` - Quick start guide
+- `QUICKSTART.md` - Quick start guide
 - `CONTRIBUTING.md` - Development guidelines
 - `CHANGELOG.md` - Version history
 - `LICENSE` - MIT License

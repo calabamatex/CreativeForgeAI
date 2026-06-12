@@ -2,6 +2,13 @@
 
 Provides a mock async DB session, test HTTP client, JWT auth helpers,
 and sample data factories.  No real database connection is made.
+
+P3-T0 schema-build decision: the future end-to-end integration test (P3-T0)
+MUST build its schema via ``alembic upgrade head`` against a real (ephemeral)
+Postgres, NOT via ``Base.metadata.create_all``. Running the real migration
+path is what exercises the production schema-provisioning code and catches
+migration drift. ``create_all`` is only acceptable in narrowly isolated,
+per-test fixtures and must never become the schema source of truth.
 """
 
 from __future__ import annotations

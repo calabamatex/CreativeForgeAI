@@ -1,26 +1,13 @@
-# Runtime dependencies
-pydantic>=2.5.0
-python-dotenv>=1.0.0
-
-# Async & HTTP
-aiohttp>=3.9.1
-
-# Image Processing
-Pillow>=10.3.0
-
-# System Monitoring
-psutil>=5.9.0
-
-# Document Parsing
-PyMuPDF>=1.23.8
-python-docx>=1.1.0
-PyYAML>=6.0.1
-
-# CLI
-click>=8.1.7
-
-# Structured logging
-structlog>=24.0.0
-
-# Optional: Rich console output
-rich>=13.7.0
+# Dependencies are defined in pyproject.toml (the single source of truth).
+#
+# Full application (API + worker + S3 storage):
+#     pip install -e ".[api,worker,s3]"
+#
+# CLI pipeline only:
+#     pip install -e "."
+#
+# Contributors (adds lint, type-check, and the test suite):
+#     pip install -e ".[api,worker,s3,dev]"
+#
+# This file is intentionally not the source of truth; it remains only so that
+# existing `pip install -r requirements.txt` references do not break.

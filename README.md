@@ -116,13 +116,63 @@ cd adobe-genai-project
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (full app: API + worker + S3 storage)
+# Dependencies are defined in pyproject.toml — the single source of truth.
+pip install -e ".[api,worker,s3]"
+
+# CLI pipeline only:        pip install -e "."
+# Contributors (lint/types/tests): pip install -e ".[api,worker,s3,dev]"
 ```
 
-### 2. Configure API Keys
+### 2. Start Local Dev Services (Postgres + Redis + MinIO)
 
-Create a `.env` file in the project root:
+The API/worker stack uses Postgres, Redis, and MinIO (S3-compatible storage),
+provided by Docker Compose. Bring them up and create the assets bucket:
+
+```bash
+# Start Postgres, Redis, MinIO (+ a one-shot job that creates the bucket)
+docker compose up -d
+
+# Wait until all show "(healthy)"
+docker compose ps
+```
+
+> **Host ports are remapped** to avoid clashing with other local stacks:
+> Postgres `localhost:5434`, Redis `localhost:6380`, MinIO API `localhost:9002`
+> (console `localhost:9003`). See `docs/FOUND_ISSUES.md` for the why.
+
+Copy the env template — its local-dev defaults already point at these services
+with working credentials (non-secret, local only):
+
+```bash
+cp .env.example .env
+```
+
+The `minio-init` Compose service creates the `genai-assets` bucket on `up`. To
+(re)create it manually:
+
+```bash
+docker run --rm --network host minio/mc:latest /bin/sh -c \
+  "mc alias set local http://localhost:9002 minioadmin minioadmin && \
+   mc mb --ignore-existing local/genai-assets"
+```
+
+**Sanity-check connectivity** (with `.env` loaded — `set -a; . ./.env; set +a`):
+
+```bash
+# Postgres: apply migrations
+alembic upgrade head
+
+# Redis
+python -c "import asyncio,redis.asyncio as r; asyncio.run(r.from_url('redis://localhost:6380/0').ping()); print('redis ok')"
+
+# MinIO / S3: list the assets bucket via the repo storage backend
+STORAGE_BACKEND=s3 python -c "import asyncio; from src.storage_factory import get_default_storage_backend as g; asyncio.run(g().list_keys('')); print('minio ok')"
+```
+
+### 3. Configure API Keys
+
+Add your API keys to the `.env` file in the project root:
 
 ```bash
 # Required
@@ -135,7 +185,7 @@ ADOBE_CLIENT_ID=your-client-id
 ADOBE_CLIENT_SECRET=your-client-secret
 ```
 
-### 3. Run Your First Campaign
+### 4. Run Your First Campaign
 
 ```bash
 # Process example campaign
@@ -149,7 +199,7 @@ That's it! Your assets will be generated in `output/[PRODUCT_ID]/[CAMPAIGN_ID]/`
 ## 📚 Documentation
 
 ### Core Documentation
-- **[QUICK_START.md](QUICK_START.md)** - Step-by-step setup guide
+- **[QUICKSTART.md](QUICKSTART.md)** - Step-by-step setup guide
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and components
 - **[FEATURES.md](FEATURES.md)** - Complete feature matrix
 - **[API.md](docs/API.md)** - API reference

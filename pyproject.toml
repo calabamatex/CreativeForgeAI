@@ -3,9 +3,10 @@ name = "adobe-genai-platform"
 version = "2.0.0"
 description = "AI-powered creative automation platform"
 requires-python = ">=3.11"
+# Core: always needed by the CLI pipeline. The API/DB/worker/S3 runtime stack
+# lives in the optional-dependency groups below so that `pip install -e "."`
+# yields a working CLI without pulling in the server stack.
 dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.30.0",
     "pydantic[email]>=2.5.0",
     "python-dotenv>=1.0.0",
     "aiohttp>=3.9.1",
@@ -16,21 +17,41 @@ dependencies = [
     "PyYAML>=6.0.1",
     "click>=8.1.7",
     "structlog>=24.0.0",
-    "sqlalchemy[asyncio]>=2.0.0",
-    "asyncpg>=0.29.0",
-    "alembic>=1.13.0",
-    "arq>=0.26.0",
-    "redis>=5.0.0",
-    "python-jose[cryptography]>=3.3.0",
-    "passlib[bcrypt]>=1.7.4",
-    "python-multipart>=0.0.7",
-    "boto3>=1.34.0",
-    "aioboto3>=13.0.0",
-    "aiofiles>=24.1.0",
-    "httpx>=0.27.0",
+    "rich>=13.7.0",
 ]
 
 [project.optional-dependencies]
+# API server + auth + the DB layer it depends on. Install with:
+#   pip install -e ".[api]"
+api = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.7",
+    "httpx>=0.27.0",
+    # DB layer (shared with the worker group; pip dedupes the overlap)
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+]
+# Background worker (arq/redis) + the same DB layer the worker reads/writes.
+worker = [
+    "arq>=0.26.0",
+    "redis>=5.0.0",
+    # DB layer (shared with the api group; pip dedupes the overlap)
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+]
+# S3-compatible object storage.
+s3 = [
+    "boto3>=1.34.0",
+    "aioboto3>=13.0.0",
+    "aiofiles>=24.1.0",
+]
+# Test tooling. Kept as a distinct group (rather than folded into dev) so CI can
+# install just the runtime test deps without the lint/type/pre-commit toolchain.
 test = [
     "pytest>=7.4.3",
     "pytest-asyncio>=0.23.0",
@@ -39,10 +60,14 @@ test = [
     "httpx>=0.27.0",
     "factory-boy>=3.3.0",
 ]
+# Contributor tooling. This project formats with `ruff format` (see
+# [tool.ruff.format]) rather than black, so no black here. dev includes test so
+# that `pip install -e ".[dev]"` gives contributors lint + types + the test suite.
 dev = [
     "ruff>=0.4.0",
     "mypy>=1.10.0",
     "pre-commit>=3.7.0",
+    "adobe-genai-platform[test]",
 ]
 
 [tool.pytest.ini_options]

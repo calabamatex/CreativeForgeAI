@@ -66,6 +66,7 @@ logs/
 credentials.json
 
 # Temporary files
+temp/
 *.tmp
 *.bak
 *.swp
@@ -112,6 +113,9 @@ uploads/
 *_backup.*
 examples/campaigns/*_2026-*.json
 examples/campaigns/*_2025-*.json
+
+# Timestamped example run artifacts (keep canonical inputs like examples/campaign_brief.json)
+examples/*_20*T*.json
 
 # Agent build-time state (local; do not commit)
 .claude-flow/
