@@ -1,8 +1,11 @@
 """Parser for legal compliance guidelines."""
-import yaml
+
 import json
 from pathlib import Path
+
 import structlog
+import yaml
+
 from src.models import LegalComplianceGuidelines
 from src.parsers.brand_parser import BrandGuidelinesParser
 
@@ -20,27 +23,30 @@ class LegalComplianceParser(BrandGuidelinesParser):
             raise FileNotFoundError(f"File not found: {file_path}")
 
         # Handle structured formats directly
-        if path.suffix.lower() in ['.yaml', '.yml']:
-            with open(file_path, 'r') as f:
+        if path.suffix.lower() in [".yaml", ".yml"]:
+            with open(file_path) as f:
                 data = yaml.safe_load(f)
-                data['source_file'] = file_path
+                data["source_file"] = file_path
                 return LegalComplianceGuidelines(**data)
 
-        elif path.suffix.lower() == '.json':
-            with open(file_path, 'r') as f:
+        elif path.suffix.lower() == ".json":
+            with open(file_path) as f:
                 data = json.load(f)
-                data['source_file'] = file_path
+                data["source_file"] = file_path
                 return LegalComplianceGuidelines(**data)
 
         # For documents, extract text and use Claude
         else:
-            if path.suffix.lower() == '.pdf':
-                text = self._extract_pdf(file_path)
-            elif path.suffix.lower() in ['.docx', '.doc']:
-                text = self._extract_docx(file_path)
+            # Text is extracted to validate the document is readable, but
+            # structured extraction (e.g. via Claude) is not yet implemented for
+            # unstructured formats, so the content itself is intentionally unused.
+            if path.suffix.lower() == ".pdf":
+                _text = self._extract_pdf(file_path)
+            elif path.suffix.lower() in [".docx", ".doc"]:
+                _text = self._extract_docx(file_path)
             else:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    text = f.read()
+                with open(file_path, encoding="utf-8") as f:
+                    _text = f.read()
 
             # For now, return empty guidelines if no structured format
             # In the future, could use Claude to extract legal guidelines from text

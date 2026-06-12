@@ -2,10 +2,12 @@
 Comprehensive tests for GenAI services (multi-backend image generation + Claude).
 All HTTP requests are mocked for unit testing.
 """
-import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
-import json
+
 import base64
+import json
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 
 class TestFireflyService:
@@ -26,19 +28,23 @@ class TestFireflyService:
         mock_image_response.status = 200
         mock_image_response.read = AsyncMock(return_value=mock_image_bytes)
 
-        with patch('aiohttp.ClientSession.post', return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_api_response))):
-            with patch('aiohttp.ClientSession.get', return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_image_response))):
-                service = FireflyImageService(
-                    api_key="test-key",
-                    client_id="test-client"
-                )
+        with patch(
+            "aiohttp.ClientSession.post", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_api_response))
+        ):
+            with patch(
+                "aiohttp.ClientSession.get",
+                return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_image_response)),
+            ):
+                service = FireflyImageService(api_key="test-key", client_id="test-client")
                 result = await service.generate_image("test prompt", size="2048x2048")
 
                 assert result is not None
                 assert len(result) > 0
 
     @pytest.mark.asyncio
-    async def test_generate_with_brand_guidelines(self, mock_firefly_response, mock_image_bytes, brand_guidelines_model):
+    async def test_generate_with_brand_guidelines(
+        self, mock_firefly_response, mock_image_bytes, brand_guidelines_model
+    ):
         """Test Firefly generation with brand guidelines."""
         from src.genai.firefly import FireflyImageService
 
@@ -50,13 +56,15 @@ class TestFireflyService:
         mock_image_response.status = 200
         mock_image_response.read = AsyncMock(return_value=mock_image_bytes)
 
-        with patch('aiohttp.ClientSession.post', return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_api_response))) as mock_post:
-            with patch('aiohttp.ClientSession.get', return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_image_response))):
+        with patch(
+            "aiohttp.ClientSession.post", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_api_response))
+        ) as mock_post:
+            with patch(
+                "aiohttp.ClientSession.get",
+                return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_image_response)),
+            ):
                 service = FireflyImageService(api_key="test", client_id="test")
-                result = await service.generate_image(
-                    "product photo",
-                    brand_guidelines=brand_guidelines_model
-                )
+                result = await service.generate_image("product photo", brand_guidelines=brand_guidelines_model)
 
                 assert result is not None
                 # Verify prompt was enhanced
@@ -83,14 +91,12 @@ class TestFireflyService:
         # First call fails, second succeeds
         post_side_effects = [mock_fail, mock_success]
 
-        with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("aiohttp.ClientSession.post") as mock_post:
             mock_post.return_value.__aenter__.side_effect = post_side_effects
-            with patch('aiohttp.ClientSession.get', return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_image))):
-                service = FireflyImageService(
-                    api_key="test",
-                    client_id="test",
-                    max_retries=3
-                )
+            with patch(
+                "aiohttp.ClientSession.get", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_image))
+            ):
+                service = FireflyImageService(api_key="test", client_id="test", max_retries=3)
                 result = await service.generate_image("prompt")
 
                 assert result is not None
@@ -107,7 +113,7 @@ class TestFireflyService:
 class TestOpenAIService:
     """Test OpenAI DALL-E 3 image generation service."""
 
-    @patch('aiohttp.ClientSession.post')
+    @patch("aiohttp.ClientSession.post")
     @pytest.mark.asyncio
     async def test_generate_image_success(self, mock_post, mock_openai_response, mock_image_bytes):
         """Test successful OpenAI image generation."""
@@ -123,7 +129,7 @@ class TestOpenAIService:
         mock_get.status = 200
         mock_get.read = AsyncMock(return_value=mock_image_bytes)
 
-        with patch('aiohttp.ClientSession.get', return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_get))):
+        with patch("aiohttp.ClientSession.get", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_get))):
             mock_post.return_value.__aenter__.return_value = mock_api_response
 
             service = OpenAIImageService(api_key="test-key")
@@ -132,7 +138,7 @@ class TestOpenAIService:
             assert result is not None
             assert len(result) > 0
 
-    @patch('aiohttp.ClientSession.post')
+    @patch("aiohttp.ClientSession.post")
     @pytest.mark.asyncio
     async def test_openai_size_conversion(self, mock_post, mock_openai_response, mock_image_bytes):
         """Test OpenAI size format conversion."""
@@ -146,7 +152,7 @@ class TestOpenAIService:
         mock_get.status = 200
         mock_get.read = AsyncMock(return_value=mock_image_bytes)
 
-        with patch('aiohttp.ClientSession.get', return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_get))):
+        with patch("aiohttp.ClientSession.get", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_get))):
             mock_post.return_value.__aenter__.return_value = mock_api_response
 
             service = OpenAIImageService(api_key="test")
@@ -165,9 +171,11 @@ class TestOpenAIService:
         assert "OpenAI" in service.get_backend_name()
         assert "DALL-E" in service.get_backend_name()
 
-    @patch('aiohttp.ClientSession.post')
+    @patch("aiohttp.ClientSession.post")
     @pytest.mark.asyncio
-    async def test_openai_with_brand_guidelines(self, mock_post, mock_openai_response, mock_image_bytes, brand_guidelines_model):
+    async def test_openai_with_brand_guidelines(
+        self, mock_post, mock_openai_response, mock_image_bytes, brand_guidelines_model
+    ):
         """Test OpenAI generation with brand guidelines."""
         from src.genai.openai_service import OpenAIImageService
 
@@ -179,14 +187,11 @@ class TestOpenAIService:
         mock_get.status = 200
         mock_get.read = AsyncMock(return_value=mock_image_bytes)
 
-        with patch('aiohttp.ClientSession.get', return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_get))):
+        with patch("aiohttp.ClientSession.get", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_get))):
             mock_post.return_value.__aenter__.return_value = mock_api_response
 
             service = OpenAIImageService(api_key="test")
-            result = await service.generate_image(
-                "product",
-                brand_guidelines=brand_guidelines_model
-            )
+            result = await service.generate_image("product", brand_guidelines=brand_guidelines_model)
 
             assert result is not None
 
@@ -194,7 +199,7 @@ class TestOpenAIService:
 class TestGeminiService:
     """Test Google Gemini Imagen image generation service."""
 
-    @patch('aiohttp.ClientSession.post')
+    @patch("aiohttp.ClientSession.post")
     @pytest.mark.asyncio
     async def test_generate_image_success(self, mock_post, mock_gemini_response):
         """Test successful Gemini image generation."""
@@ -211,7 +216,7 @@ class TestGeminiService:
         assert result is not None
         assert len(result) > 0
 
-    @patch('aiohttp.ClientSession.post')
+    @patch("aiohttp.ClientSession.post")
     @pytest.mark.asyncio
     async def test_gemini_base64_decoding(self, mock_post):
         """Test Gemini base64 image decoding."""
@@ -219,13 +224,9 @@ class TestGeminiService:
 
         # Create actual base64 encoded image
         test_image = b"test image data"
-        encoded = base64.b64encode(test_image).decode('utf-8')
+        encoded = base64.b64encode(test_image).decode("utf-8")
 
-        gemini_response = {
-            "predictions": [
-                {"bytesBase64Encoded": encoded}
-            ]
-        }
+        gemini_response = {"predictions": [{"bytesBase64Encoded": encoded}]}
 
         mock_api_response = AsyncMock()
         mock_api_response.status = 200
@@ -245,7 +246,7 @@ class TestGeminiService:
         assert "Gemini" in service.get_backend_name()
         assert "Imagen" in service.get_backend_name()
 
-    @patch('aiohttp.ClientSession.post')
+    @patch("aiohttp.ClientSession.post")
     @pytest.mark.asyncio
     async def test_gemini_with_brand_guidelines(self, mock_post, mock_gemini_response, brand_guidelines_model):
         """Test Gemini generation with brand guidelines."""
@@ -257,10 +258,7 @@ class TestGeminiService:
         mock_post.return_value.__aenter__.return_value = mock_api_response
 
         service = GeminiImageService(api_key="test")
-        result = await service.generate_image(
-            "product",
-            brand_guidelines=brand_guidelines_model
-        )
+        result = await service.generate_image("product", brand_guidelines=brand_guidelines_model)
 
         assert result is not None
 
@@ -338,8 +336,8 @@ class TestImageGenerationFactory:
 
     def test_factory_create_claude(self):
         """Test factory creates Claude placeholder."""
-        from src.genai.factory import ImageGenerationFactory
         from src.genai.claude_service_image import ClaudeImageService
+        from src.genai.factory import ImageGenerationFactory
 
         service = ImageGenerationFactory.create("claude", api_key="test")
 
@@ -369,7 +367,7 @@ class TestImageGenerationFactory:
 class TestClaudeTextService:
     """Test Anthropic Claude API for text processing."""
 
-    @patch('aiohttp.ClientSession.post')
+    @patch("aiohttp.ClientSession.post")
     @pytest.mark.asyncio
     async def test_localize_message(self, mock_post, mock_claude_response):
         """Test Claude message localization."""
@@ -380,11 +378,11 @@ class TestClaudeTextService:
         localized_data = {
             "headline": "Producto Revolucionario",
             "subheadline": "Experimenta la Innovación",
-            "cta": "Compra Ahora"
+            "cta": "Compra Ahora",
         }
 
         claude_resp = mock_claude_response.copy()
-        claude_resp['content'][0]['text'] = json.dumps(localized_data)
+        claude_resp["content"][0]["text"] = json.dumps(localized_data)
 
         mock_api_response = AsyncMock()
         mock_api_response.status = 200
@@ -392,23 +390,16 @@ class TestClaudeTextService:
         mock_post.return_value.__aenter__.return_value = mock_api_response
 
         service = ClaudeService()
-        message = CampaignMessage(
-            headline="Revolutionary Product",
-            subheadline="Experience Innovation",
-            cta="Shop Now"
-        )
+        message = CampaignMessage(headline="Revolutionary Product", subheadline="Experience Innovation", cta="Shop Now")
 
-        guidelines = LocalizationGuidelines(
-            source_file="test.yaml",
-            market_specific_rules={"es-MX": {"tone": "warm"}}
-        )
+        guidelines = LocalizationGuidelines(source_file="test.yaml", market_specific_rules={"es-MX": {"tone": "warm"}})
 
         result = await service.localize_message(message, "es-MX", guidelines)
 
         assert result.headline == "Producto Revolucionario"
         assert result.cta == "Compra Ahora"
 
-    @patch('aiohttp.ClientSession.post')
+    @patch("aiohttp.ClientSession.post")
     @pytest.mark.asyncio
     async def test_extract_guidelines(self, mock_post, brand_guidelines_text):
         """Test Claude guideline extraction."""
@@ -418,12 +409,12 @@ class TestClaudeTextService:
             "primary_colors": ["#0066CC"],
             "primary_font": "Montserrat",
             "brand_voice": "Professional",
-            "photography_style": "Modern"
+            "photography_style": "Modern",
         }
 
         claude_resp = {
-            'content': [{'text': json.dumps(extracted)}],
-            'usage': {'input_tokens': 100, 'output_tokens': 50}
+            "content": [{"text": json.dumps(extracted)}],
+            "usage": {"input_tokens": 100, "output_tokens": 50},
         }
 
         mock_api_response = AsyncMock()
@@ -464,9 +455,7 @@ class TestMultiBackendIntegration:
                 continue
 
             service = ImageGenerationFactory.create(
-                backend_name,
-                api_key="test",
-                client_id="test" if backend_name == "firefly" else None
+                backend_name, api_key="test", client_id="test" if backend_name == "firefly" else None
             )
 
             name = service.get_backend_name()
@@ -476,17 +465,17 @@ class TestMultiBackendIntegration:
     def test_backend_aliases_resolve_correctly(self):
         """Test that backend aliases resolve to correct classes."""
         from src.genai.factory import ImageGenerationFactory
-        from src.genai.openai_service import OpenAIImageService
         from src.genai.gemini_service import GeminiImageService
+        from src.genai.openai_service import OpenAIImageService
 
         # OpenAI aliases
         openai = ImageGenerationFactory.create("openai", api_key="test")
         dalle = ImageGenerationFactory.create("dall-e", api_key="test")
-        assert type(openai) == type(dalle)
+        assert type(openai) is type(dalle)
         assert isinstance(openai, OpenAIImageService)
 
         # Gemini aliases
         gemini = ImageGenerationFactory.create("gemini", api_key="test")
         imagen = ImageGenerationFactory.create("imagen", api_key="test")
-        assert type(gemini) == type(imagen)
+        assert type(gemini) is type(imagen)
         assert isinstance(gemini, GeminiImageService)

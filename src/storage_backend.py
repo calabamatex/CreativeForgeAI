@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import List
 
 import structlog
 
@@ -27,8 +26,7 @@ def validate_storage_key(key: str) -> None:
         raise ValueError(f"Storage key must not contain '..': {key}")
     if not _VALID_KEY_RE.match(key):
         raise ValueError(
-            f"Storage key contains invalid characters: {key}. "
-            "Only alphanumeric, '/', '-', '_', and '.' are allowed."
+            f"Storage key contains invalid characters: {key}. Only alphanumeric, '/', '-', '_', and '.' are allowed."
         )
 
 
@@ -137,7 +135,7 @@ class StorageBackend(ABC):
         """
 
     @abstractmethod
-    async def list_keys(self, prefix: str) -> List[str]:
+    async def list_keys(self, prefix: str) -> list[str]:
         """List all keys matching *prefix*.
 
         Args:

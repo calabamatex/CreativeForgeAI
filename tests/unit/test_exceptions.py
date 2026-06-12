@@ -1,17 +1,17 @@
 """Tests for the application exception hierarchy."""
-import pytest
 
+import pytest
 from src.exceptions import (
     AppError,
-    NotFoundError,
-    ValidationError,
-    ConfigurationError,
     AuthenticationError,
     AuthorizationError,
     BackendUnavailableError,
     ComplianceError,
-    StorageError,
+    ConfigurationError,
     JobError,
+    NotFoundError,
+    StorageError,
+    ValidationError,
 )
 
 
@@ -68,7 +68,9 @@ class TestAppError:
         assert str(err) == "something broke"
 
     def test_catchable_as_exception(self):
-        with pytest.raises(Exception):
+        # Intentionally broad: the assertion IS that AppError is a subclass of
+        # the builtin Exception, so narrowing the match would defeat the test.
+        with pytest.raises(Exception):  # noqa: B017
             raise AppError("test")
 
 

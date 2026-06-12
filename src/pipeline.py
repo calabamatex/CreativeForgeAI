@@ -1,38 +1,38 @@
 """Main pipeline orchestrator for creative automation."""
+
 import asyncio
 import time
-import psutil
-from io import BytesIO
-from pathlib import Path
-from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
+from io import BytesIO
+from pathlib import Path
 
-from PIL import Image
+import psutil
 import structlog
+from PIL import Image
 
+from src.config import get_config
+from src.exceptions import BackendUnavailableError, ComplianceError
+from src.genai.claude import ClaudeService
+from src.genai.factory import ImageGenerationFactory
+from src.image_processor import ImageProcessorV2 as ImageProcessor
+from src.legal_checker import LegalComplianceChecker
 from src.models import (
     CampaignBrief,
     CampaignMessage,
+    CampaignOutput,
     ComprehensiveBrandGuidelines,
     GeneratedAsset,
-    CampaignOutput,
     LegalComplianceGuidelines,
     LocalizationGuidelines,
     Product,
 )
-from src.config import get_config
-from src.exceptions import ComplianceError, StorageError, BackendUnavailableError
-from src.genai.factory import ImageGenerationFactory
-from src.genai.claude import ClaudeService
 from src.parsers.brand_parser import BrandGuidelinesParser
-from src.parsers.localization_parser import LocalizationGuidelinesParser
 from src.parsers.legal_parser import LegalComplianceParser
-from src.image_processor import ImageProcessorV2 as ImageProcessor
-from src.legal_checker import LegalComplianceChecker
+from src.parsers.localization_parser import LocalizationGuidelinesParser
+from src.pipeline_metrics import RawMetricData, compute_technical_metrics
 from src.storage import StorageManager
 from src.storage_backend import build_asset_key
-from src.pipeline_metrics import RawMetricData, compute_technical_metrics
 
 logger = structlog.get_logger(__name__)
 
@@ -75,7 +75,7 @@ class CreativeAutomationPipeline:
 
     async def _load_guidelines(
         self, brief: CampaignBrief, metrics: _MetricsState
-    ) -> Tuple[Optional[ComprehensiveBrandGuidelines], Optional[LocalizationGuidelines], Optional[LegalComplianceGuidelines]]:
+    ) -> tuple[ComprehensiveBrandGuidelines | None, LocalizationGuidelines | None, LegalComplianceGuidelines | None]:
         """Load brand, localization, and legal guidelines.
 
         Returns (brand_guidelines, localization_guidelines, legal_guidelines).
@@ -108,7 +108,7 @@ class CreativeAutomationPipeline:
 
     async def _run_legal_compliance(
         self, brief: CampaignBrief, metrics: _MetricsState
-    ) -> Optional[LegalComplianceGuidelines]:
+    ) -> LegalComplianceGuidelines | None:
         """Load legal guidelines and run compliance pre-check.
 
         Returns parsed legal guidelines, or None if file is missing.
@@ -123,7 +123,7 @@ class CreativeAutomationPipeline:
             check_start = time.time()
             checker = LegalComplianceChecker(legal_guidelines)
 
-            is_compliant, violations = checker.check_content(
+            _is_compliant, violations = checker.check_content(
                 brief.campaign_message,
                 product_content=None,
                 locale=brief.target_locales[0] if brief.target_locales else "en-US",
@@ -139,8 +139,9 @@ class CreativeAutomationPipeline:
                     product_content=product_content,
                     locale=brief.target_locales[0] if brief.target_locales else "en-US",
                 )
-                if not product_compliant:
-                    is_compliant = False
+                # product_compliant is folded into the overall report/violations
+                # below; the aggregate decision is driven by `violations`.
+                _ = product_compliant
 
             if violations:
                 logger.warning("pipeline.compliance_violations_found", report=checker.generate_report())
@@ -173,10 +174,10 @@ class CreativeAutomationPipeline:
     async def _get_hero_image(
         self,
         product: Product,
-        brand_guidelines: Optional[ComprehensiveBrandGuidelines],
+        brand_guidelines: ComprehensiveBrandGuidelines | None,
         backend_name: str,
         metrics: _MetricsState,
-    ) -> Tuple[bytes, Optional[str], bool]:
+    ) -> tuple[bytes, str | None, bool]:
         """Load existing or generate a new hero image for a product.
 
         Returns (image_bytes, saved_path_or_None, was_saved).
@@ -188,7 +189,7 @@ class CreativeAutomationPipeline:
                     hero_bytes = f.read()
                 metrics.cache_hits += 1
                 return hero_bytes, product.existing_assets["hero"], True
-            except (FileNotFoundError, IOError) as e:
+            except (OSError, FileNotFoundError) as e:
                 logger.warning("pipeline.existing_hero_unreadable", error=str(e), backend=backend_name)
                 # Fall through to generate
 
@@ -211,9 +212,7 @@ class CreativeAutomationPipeline:
 
         return hero_bytes, None, False
 
-    def _save_hero_image(
-        self, hero_bytes: bytes, product_id: str, campaign_id: str
-    ) -> str:
+    def _save_hero_image(self, hero_bytes: bytes, product_id: str, campaign_id: str) -> str:
         """Save hero image bytes to disk, return the saved path.
 
         Hero images are an *intermediate* cache (reused across locales/ratios
@@ -250,8 +249,8 @@ class CreativeAutomationPipeline:
         product: Product,
         ratio: str,
         brief: CampaignBrief,
-        brand_guidelines: Optional[ComprehensiveBrandGuidelines],
-    ) -> Tuple[bytes, str, float]:
+        brand_guidelines: ComprehensiveBrandGuidelines | None,
+    ) -> tuple[bytes, str, float]:
         """Process a hero image into a final asset for one aspect ratio.
 
         Produces the final asset as in-memory bytes -- it does NOT write the
@@ -295,7 +294,7 @@ class CreativeAutomationPipeline:
     async def process_campaign(
         self,
         brief: CampaignBrief,
-        brief_path: Optional[str] = None,
+        brief_path: str | None = None,
     ) -> CampaignOutput:
         """Process complete campaign and generate all assets."""
         start_time = time.time()
@@ -336,9 +335,9 @@ class CreativeAutomationPipeline:
 
         # Process products
         logger.info("pipeline.generating_assets", products=len(brief.products))
-        generated_assets: List[GeneratedAsset] = []
-        hero_images: Dict[str, str] = {}
-        errors: List[str] = []
+        generated_assets: list[GeneratedAsset] = []
+        hero_images: dict[str, str] = {}
+        errors: list[str] = []
 
         for product in brief.products:
             logger.info("pipeline.processing_product", product_name=product.product_name, product_id=product.product_id)
@@ -370,7 +369,7 @@ class CreativeAutomationPipeline:
                     for ratio in brief.aspect_ratios:
                         asset_key = f"{locale}_{ratio}"
                         proc_ms = None
-                        image_bytes: Optional[bytes] = None
+                        image_bytes: bytes | None = None
                         output_format = brief.output_formats[0] if brief.output_formats else "png"
 
                         if product.existing_assets and asset_key in product.existing_assets:
@@ -381,9 +380,7 @@ class CreativeAutomationPipeline:
                                 # single backend write path persists them.
                                 with open(existing_path, "rb") as fh:
                                     image_bytes = fh.read()
-                                output_format = (
-                                    existing_path.rsplit(".", 1)[-1] or "png"
-                                ).lower()
+                                output_format = (existing_path.rsplit(".", 1)[-1] or "png").lower()
                             else:
                                 logger.warning("pipeline.existing_asset_missing", ratio=ratio)
                                 image_bytes, output_format, proc_ms = self._generate_asset_for_ratio(
@@ -409,28 +406,30 @@ class CreativeAutomationPipeline:
                             fmt=output_format,
                         )
 
-                        generated_assets.append(GeneratedAsset(
-                            product_id=product.product_id,
-                            locale=locale,
-                            aspect_ratio=ratio,
-                            # No on-disk asset is written by the pipeline anymore;
-                            # ``file_path`` mirrors the canonical storage key so
-                            # downstream display/logging stays meaningful.
-                            file_path=storage_key,
-                            generation_method=backend,
-                            timestamp=datetime.now(),
-                            metadata={
-                                # Carry the per-asset image-processing latency so
-                                # the worker can persist ``generation_time_ms``.
-                                "generation_time_ms": proc_ms,
-                                # Carry the final bytes + canonical key so the
-                                # worker performs the SINGLE backend.save (no
-                                # disk-write -> reread round trip).
-                                "image_bytes": image_bytes,
-                                "storage_key": storage_key,
-                                "fmt": output_format,
-                            },
-                        ))
+                        generated_assets.append(
+                            GeneratedAsset(
+                                product_id=product.product_id,
+                                locale=locale,
+                                aspect_ratio=ratio,
+                                # No on-disk asset is written by the pipeline anymore;
+                                # ``file_path`` mirrors the canonical storage key so
+                                # downstream display/logging stays meaningful.
+                                file_path=storage_key,
+                                generation_method=backend,
+                                timestamp=datetime.now(),
+                                metadata={
+                                    # Carry the per-asset image-processing latency so
+                                    # the worker can persist ``generation_time_ms``.
+                                    "generation_time_ms": proc_ms,
+                                    # Carry the final bytes + canonical key so the
+                                    # worker performs the SINGLE backend.save (no
+                                    # disk-write -> reread round trip).
+                                    "image_bytes": image_bytes,
+                                    "storage_key": storage_key,
+                                    "fmt": output_format,
+                                },
+                            )
+                        )
 
                 if hero_path:
                     hero_images[product.product_id] = hero_path
@@ -439,10 +438,12 @@ class CreativeAutomationPipeline:
                 error_msg = f"Error processing product {product.product_id}: {e}"
                 logger.error("pipeline.product_failed", product_id=product.product_id, error=str(e), exc_info=True)
                 errors.append(error_msg)
-                metrics.full_error_traces.append({
-                    "product_id": product.product_id,
-                    "error": str(e),
-                })
+                metrics.full_error_traces.append(
+                    {
+                        "product_id": product.product_id,
+                        "error": str(e),
+                    }
+                )
 
             current_mem = process.memory_info().rss / (1024 * 1024)
             metrics.peak_memory_mb = max(metrics.peak_memory_mb, current_mem)

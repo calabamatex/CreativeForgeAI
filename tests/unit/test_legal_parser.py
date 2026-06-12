@@ -1,12 +1,12 @@
 """Tests for the legal compliance guidelines parser."""
-import pytest
+
 import json
-import yaml
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from src.parsers.legal_parser import LegalComplianceParser
+import pytest
+import yaml
 from src.models import LegalComplianceGuidelines
+from src.parsers.legal_parser import LegalComplianceParser
 
 
 @pytest.fixture

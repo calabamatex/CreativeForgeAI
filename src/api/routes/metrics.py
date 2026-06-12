@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import uuid
 
+import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.api.dependencies import check_rate_limit, get_current_user, get_db
 from src.api.errors import NotFoundError
@@ -61,9 +61,7 @@ async def get_campaign_metrics(
 
     # Total asset count
     total_assets = (
-        await db.execute(
-            select(func.count()).where(GeneratedAsset.campaign_id == campaign_id)
-        )
+        await db.execute(select(func.count()).where(GeneratedAsset.campaign_id == campaign_id))
     ).scalar_one()
 
     # Assets by locale
@@ -133,9 +131,7 @@ async def get_campaign_metrics(
         # cost = api_calls x unit_price(backend_used). Unpriced backends
         # (e.g. the "fake" test backend) contribute $0.00.
         backend_used = tech.get("backend_used") or campaign.image_backend
-        cost_estimate_usd = get_config().estimate_image_cost_usd(
-            backend_used, api_calls
-        )
+        cost_estimate_usd = get_config().estimate_image_cost_usd(backend_used, api_calls)
 
     metrics = CampaignMetricsResponse(
         campaign_id=campaign_id,
@@ -175,39 +171,24 @@ async def get_aggregate_metrics(
         Job,
     )
 
-    total_campaigns = (
-        await db.execute(select(func.count()).select_from(Campaign))
-    ).scalar_one()
+    total_campaigns = (await db.execute(select(func.count()).select_from(Campaign))).scalar_one()
 
-    total_assets = (
-        await db.execute(select(func.count()).select_from(GeneratedAsset))
-    ).scalar_one()
+    total_assets = (await db.execute(select(func.count()).select_from(GeneratedAsset))).scalar_one()
 
     # Campaigns by status
-    status_rows = (
-        await db.execute(
-            select(Campaign.status, func.count()).group_by(Campaign.status)
-        )
-    ).all()
+    status_rows = (await db.execute(select(Campaign.status, func.count()).group_by(Campaign.status))).all()
     campaigns_by_status = {row[0]: row[1] for row in status_rows}
 
     # Campaigns by backend
     backend_rows = (
-        await db.execute(
-            select(Campaign.image_backend, func.count()).group_by(Campaign.image_backend)
-        )
+        await db.execute(select(Campaign.image_backend, func.count()).group_by(Campaign.image_backend))
     ).all()
     campaigns_by_backend = {row[0]: row[1] for row in backend_rows}
 
     # Average processing time for completed jobs
     avg_time_result = (
         await db.execute(
-            select(
-                func.avg(
-                    func.extract("epoch", Job.completed_at)
-                    - func.extract("epoch", Job.started_at)
-                )
-            ).where(
+            select(func.avg(func.extract("epoch", Job.completed_at) - func.extract("epoch", Job.started_at))).where(
                 Job.status == "completed",
                 Job.started_at.isnot(None),
                 Job.completed_at.isnot(None),
@@ -220,22 +201,14 @@ async def get_aggregate_metrics(
     # technical_metrics JSONB column; sum it after casting the JSON scalar to
     # an integer so the total reflects real recorded runs (not a hardcoded 0).
     total_api_calls_result = (
-        await db.execute(
-            select(
-                func.sum(
-                    CampaignMetric.technical_metrics["total_api_calls"].as_integer()
-                )
-            )
-        )
+        await db.execute(select(func.sum(CampaignMetric.technical_metrics["total_api_calls"].as_integer())))
     ).scalar_one()
     total_api_calls = int(total_api_calls_result or 0)
 
     # Average compliance pass rate across all compliance reports. Pass rate per
     # report = share of checks that are NOT error-severity violations; the
     # average is computed in Python over the persisted reports (small N).
-    reports = (
-        (await db.execute(select(ComplianceReport.violations))).all()
-    )
+    reports = (await db.execute(select(ComplianceReport.violations))).all()
     if reports:
         rates: list[float] = []
         for (violations,) in reports:

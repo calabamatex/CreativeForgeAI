@@ -1,9 +1,10 @@
 """Integration tests for metrics endpoints."""
+
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,8 +15,7 @@ from tests.integration.conftest import (
     _make_job,
 )
 
-
-NOW = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 
 
 def _db_returning_sequence(mock_db, *results):
@@ -35,13 +35,13 @@ class TestGetCampaignMetrics:
         # report, metric_row
         _db_returning_sequence(
             mock_db,
-            campaign,           # campaign lookup
-            5,                  # total asset count
+            campaign,  # campaign lookup
+            5,  # total asset count
             [("en-US", 3), ("es-MX", 2)],  # assets by locale
-            [("1:1", 3), ("16:9", 2)],     # assets by ratio
-            None,               # no completed job
-            None,               # no compliance report
-            None,               # no persisted metric row
+            [("1:1", 3), ("16:9", 2)],  # assets by ratio
+            None,  # no completed job
+            None,  # no compliance report
+            None,  # no persisted metric row
         )
 
         resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/metrics")
@@ -65,18 +65,18 @@ class TestGetCampaignMetrics:
         campaign = _make_campaign()
 
         job = _make_job(status="completed")
-        job.started_at = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
-        job.completed_at = datetime(2026, 3, 1, 12, 2, 30, tzinfo=timezone.utc)
+        job.started_at = datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
+        job.completed_at = datetime(2026, 3, 1, 12, 2, 30, tzinfo=UTC)
 
         _db_returning_sequence(
             mock_db,
             campaign,
             10,
-            [],     # no locale breakdown
-            [],     # no ratio breakdown
-            job,    # completed job
-            None,   # no compliance report
-            None,   # no persisted metric row
+            [],  # no locale breakdown
+            [],  # no ratio breakdown
+            job,  # completed job
+            None,  # no compliance report
+            None,  # no persisted metric row
         )
 
         resp = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}/metrics")
@@ -101,12 +101,12 @@ class TestGetAggregateMetrics:
         # avg_time, total_api_calls, compliance reports
         _db_returning_sequence(
             mock_db,
-            10,                             # total campaigns
-            100,                            # total assets
+            10,  # total campaigns
+            100,  # total assets
             [("draft", 3), ("completed", 7)],  # by status
-            [("firefly", 8), ("openai", 2)],   # by backend
-            42.5,                           # avg processing time
-            150,                            # total api calls (summed JSONB)
+            [("firefly", 8), ("openai", 2)],  # by backend
+            42.5,  # avg processing time
+            150,  # total api calls (summed JSONB)
             # compliance reports: one clean, one with an error violation
             [([],), ([{"severity": "error"}],)],
         )
@@ -164,9 +164,7 @@ API = "/api/v1"
 # values we assert flow through persistence -> endpoint unchanged.
 RUN_CACHE_HITS = 1
 RUN_CACHE_MISSES = 3
-RUN_CACHE_HIT_RATE = round(
-    RUN_CACHE_HITS / (RUN_CACHE_HITS + RUN_CACHE_MISSES) * 100, 2
-)  # 25.0
+RUN_CACHE_HIT_RATE = round(RUN_CACHE_HITS / (RUN_CACHE_HITS + RUN_CACHE_MISSES) * 100, 2)  # 25.0
 
 
 def _brief_payload(campaign_id: str, backend: str) -> dict:
@@ -217,9 +215,7 @@ def _make_metrics_process_campaign(*, output_dir, image_backend, backend_name):
                 for ratio in brief.aspect_ratios:
                     png = await image_backend.generate_image()
                     ratio_seg = ratio.replace(":", "x")
-                    asset_dir = os.path.join(
-                        output_dir, product.product_id, locale, ratio_seg
-                    )
+                    asset_dir = os.path.join(output_dir, product.product_id, locale, ratio_seg)
                     os.makedirs(asset_dir, exist_ok=True)
                     file_path = os.path.join(asset_dir, "asset.png")
                     with open(file_path, "wb") as fh:
@@ -266,7 +262,7 @@ def _make_metrics_process_campaign(*, output_dir, image_backend, backend_name):
 
 
 async def _seed_editor(session) -> dict[str, str]:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.api.dependencies import create_access_token
     from src.db.models import User
@@ -278,8 +274,8 @@ async def _seed_editor(session) -> dict[str, str]:
         display_name="Metrics Editor",
         role="editor",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(user)
     await session.flush()
@@ -335,17 +331,13 @@ async def test_metrics_endpoint_serves_persisted_technical_metrics(
         image_backend=image_backend_mock,
         backend_name=backend,
     )
-    await fake_arq_pool.drive(
-        campaign_db_id, job_db_id, session=session, process_campaign=generate
-    )
+    await fake_arq_pool.drive(campaign_db_id, job_db_id, session=session, process_campaign=generate)
 
     job_resp = await client.get(f"{API}/jobs/{job_db_id}", headers=headers)
     assert job_resp.json()["data"]["status"] == "completed", job_resp.text
 
     # --- per-campaign metrics serve the REAL persisted values ---------------
-    m = await client.get(
-        f"{API}/campaigns/{campaign_db_id}/metrics", headers=headers
-    )
+    m = await client.get(f"{API}/campaigns/{campaign_db_id}/metrics", headers=headers)
     assert m.status_code == 200, m.text
     data = m.json()["data"]
     assert data["api_calls"] == EXPECTED_API_CALLS  # non-zero, real
@@ -353,9 +345,7 @@ async def test_metrics_endpoint_serves_persisted_technical_metrics(
     assert data["cache_hit_rate"] == RUN_CACHE_HIT_RATE  # real, not 0.0
 
     # cost == api_calls x configured unit price for the backend.
-    expected_cost = get_config().estimate_image_cost_usd(
-        backend, EXPECTED_API_CALLS
-    )
+    expected_cost = get_config().estimate_image_cost_usd(backend, EXPECTED_API_CALLS)
     assert expected_cost > 0  # openai is priced
     assert data["cost_estimate_usd"] == expected_cost
 
@@ -466,13 +456,13 @@ async def test_cost_zero_for_unpriced_backend(
         backend_name=backend,
     )
     await fake_arq_pool.drive(
-        created["id"], created["latest_job"]["id"],
-        session=session, process_campaign=generate,
+        created["id"],
+        created["latest_job"]["id"],
+        session=session,
+        process_campaign=generate,
     )
 
-    m = await client.get(
-        f"{API}/campaigns/{created['id']}/metrics", headers=headers
-    )
+    m = await client.get(f"{API}/campaigns/{created['id']}/metrics", headers=headers)
     assert m.status_code == 200, m.text
     data = m.json()["data"]
     assert data["api_calls"] == EXPECTED_API_CALLS  # still real

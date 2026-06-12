@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
@@ -116,7 +116,7 @@ class RedisCache:
     # Public API
     # ------------------------------------------------------------------
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """Retrieve a cached value by *key*.
 
         Returns the deserialised Python object, or ``None`` on miss /
@@ -137,7 +137,7 @@ class RedisCache:
         self,
         key: str,
         value: Any,
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ) -> bool:
         """Store *value* under *key* with an optional TTL (seconds).
 
@@ -268,9 +268,7 @@ class RedisCache:
     def _rate_key(bucket_key: str, window_start: int) -> str:
         return f"{RedisCache._RATE_PREFIX}{bucket_key}:{window_start}"
 
-    async def incr_rate_limit(
-        self, bucket_key: str, window_seconds: int, now: float
-    ) -> tuple[int, int]:
+    async def incr_rate_limit(self, bucket_key: str, window_seconds: int, now: float) -> tuple[int, int]:
         """Atomically increment the fixed-window counter for *bucket_key*.
 
         The window is ``[window_start, window_start + window_seconds)`` where
@@ -308,7 +306,7 @@ class RedisCache:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_cache: Optional[RedisCache] = None
+_cache: RedisCache | None = None
 
 
 def get_cache() -> RedisCache:

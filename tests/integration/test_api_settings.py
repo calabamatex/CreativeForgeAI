@@ -1,14 +1,8 @@
 """Integration tests for settings endpoints and health check."""
+
 from __future__ import annotations
 
 import pytest
-
-from tests.integration.conftest import (
-    FakeScalarResult,
-    _make_user,
-    USER_EDITOR_ID,
-    USER_VIEWER_ID,
-)
 
 
 class TestHealthCheck:

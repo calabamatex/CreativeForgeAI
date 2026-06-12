@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Sequence
+from datetime import UTC, datetime
 
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import User
 from src.exceptions import NotFoundError
@@ -85,14 +84,12 @@ class UserRepository:
             if hasattr(user, key):
                 setattr(user, key, value)
 
-        user.updated_at = datetime.now(timezone.utc)
+        user.updated_at = datetime.now(UTC)
         await self._session.flush()
         logger.info("user.updated", user_id=str(user_id), fields=list(kwargs.keys()))
         return user
 
-    async def list_users(
-        self, limit: int = 20, offset: int = 0
-    ) -> list[User]:
+    async def list_users(self, limit: int = 20, offset: int = 0) -> list[User]:
         """Return a paginated list of users ordered by creation date (desc).
 
         Args:
@@ -102,11 +99,6 @@ class UserRepository:
         Returns:
             A list of ``User`` instances.
         """
-        stmt = (
-            select(User)
-            .order_by(User.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(User).order_by(User.created_at.desc()).limit(limit).offset(offset)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())

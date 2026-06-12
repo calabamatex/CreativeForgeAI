@@ -10,12 +10,10 @@ Covers:
 from __future__ import annotations
 
 import pytest
-
 from src.storage_backend import StorageBackend
-from src.storage_factory import get_storage_backend, get_default_storage_backend
+from src.storage_factory import get_default_storage_backend, get_storage_backend
 from src.storage_local import LocalStorageBackend
 from src.storage_s3 import S3StorageBackend
-
 
 # ---------------------------------------------------------------------------
 # get_storage_backend -- local

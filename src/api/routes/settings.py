@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Depends
 import structlog
+from fastapi import APIRouter, Depends
 
-from src.api.dependencies import check_rate_limit, get_db, require_role
+from src.api.dependencies import check_rate_limit, require_role
 from src.api.schemas import (
     BackendInfo,
     Envelope,

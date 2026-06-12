@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.api.dependencies import (
     check_rate_limit,
@@ -101,10 +101,12 @@ def _gather_product_contents(brief: dict) -> list[dict]:
     for product in products:
         if not isinstance(product, dict):
             continue
-        contents.append({
-            "description": product.get("product_description", ""),
-            "features": product.get("key_features", []) or [],
-        })
+        contents.append(
+            {
+                "description": product.get("product_description", ""),
+                "features": product.get("key_features", []) or [],
+            }
+        )
     return contents
 
 
@@ -154,9 +156,7 @@ async def _run_compliance_check(campaign, db: AsyncSession) -> dict:
             campaign_id=str(campaign.id),
             error=str(exc),
         )
-        raise InternalServerError(
-            detail="Configured legal guidelines are invalid and could not be loaded."
-        ) from exc
+        raise InternalServerError(detail="Configured legal guidelines are invalid and could not be loaded.") from exc
 
     # Build the message + product content from the brief. A malformed brief is
     # likewise a server-side error, never a silent pass.
@@ -171,17 +171,13 @@ async def _run_compliance_check(campaign, db: AsyncSession) -> dict:
             campaign_id=str(campaign.id),
             error=str(exc),
         )
-        raise InternalServerError(
-            detail="Campaign brief is invalid and could not be compliance-checked."
-        ) from exc
+        raise InternalServerError(detail="Campaign brief is invalid and could not be compliance-checked.") from exc
 
     checker = LegalComplianceChecker(guidelines)
 
     # Run the checker over the message and every product. Accumulate ALL
     # violations across passes so the persisted report is complete.
-    is_compliant, message_violations = checker.check_content(
-        message, product_content=None, locale=locale
-    )
+    is_compliant, message_violations = checker.check_content(message, product_content=None, locale=locale)
     all_violations = list(message_violations)
 
     for product_content in product_contents:
@@ -255,7 +251,7 @@ async def run_compliance_check(
     campaign = await _get_campaign_or_404(campaign_id, db)
     check_result = await _run_compliance_check(campaign, db)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     report = ComplianceReport(
         id=uuid.uuid4(),
         campaign_id=campaign.id,
@@ -319,15 +315,13 @@ async def approve_compliance(
         )
 
     if report.is_compliant and not report.violations:
-        raise BadRequestError(
-            detail="Report is already fully compliant with no violations. Nothing to approve."
-        )
+        raise BadRequestError(detail="Report is already fully compliant with no violations. Nothing to approve.")
 
     # Mark as approved with warnings
     report.is_compliant = True
     summary = dict(report.summary) if report.summary else {}
     summary["approved_by"] = str(user.id)
-    summary["approved_at"] = datetime.now(timezone.utc).isoformat()
+    summary["approved_at"] = datetime.now(UTC).isoformat()
     if body and body.notes:
         summary["approval_notes"] = body.notes
     report.summary = summary

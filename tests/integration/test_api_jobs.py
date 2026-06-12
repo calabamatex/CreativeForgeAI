@@ -1,4 +1,5 @@
 """Integration tests for job endpoints."""
+
 from __future__ import annotations
 
 import uuid
@@ -8,7 +9,6 @@ import pytest
 
 from tests.integration.conftest import (
     JOB_ID,
-    CAMPAIGN_ID,
     FakeScalarResult,
     _make_job,
 )

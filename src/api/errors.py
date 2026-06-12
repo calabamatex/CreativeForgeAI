@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+import structlog
 from fastapi import Request
 from fastapi.responses import JSONResponse
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -15,6 +15,7 @@ logger = structlog.get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Base application error hierarchy
 # ---------------------------------------------------------------------------
+
 
 class AppError(Exception):
     """Base exception that maps to an HTTP error response.
@@ -110,6 +111,7 @@ class InternalServerError(AppError):
 # RFC 7807 Problem Details response builder
 # ---------------------------------------------------------------------------
 
+
 def _build_problem_detail(
     request: Request,
     status: int,
@@ -135,6 +137,7 @@ def _build_problem_detail(
 # ---------------------------------------------------------------------------
 # FastAPI exception handler
 # ---------------------------------------------------------------------------
+
 
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     """Convert any *AppError* subclass into an RFC 7807 Problem Details response."""

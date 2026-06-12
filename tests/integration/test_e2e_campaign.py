@@ -34,10 +34,10 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import UTC
 
 import pytest
 from sqlalchemy import select
-
 from src.db.models import GeneratedAsset
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration, pytest.mark.e2e]
@@ -124,9 +124,7 @@ def _make_generating_process_campaign(*, output_dir: str, image_backend):
                 for ratio in brief.aspect_ratios:
                     png = await image_backend.generate_image()
                     ratio_seg = ratio.replace(":", "x")
-                    asset_dir = os.path.join(
-                        output_dir, product.product_id, locale, ratio_seg
-                    )
+                    asset_dir = os.path.join(output_dir, product.product_id, locale, ratio_seg)
                     os.makedirs(asset_dir, exist_ok=True)
                     file_path = os.path.join(asset_dir, "asset.png")
                     with open(file_path, "wb") as fh:
@@ -178,7 +176,7 @@ async def _register_and_login(client, session) -> dict[str, str]:
     guards; seeding directly keeps the failure focused on that path (step 3),
     not the bcrypt env bug. See report / docs.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.api.dependencies import create_access_token
     from src.db.models import User
@@ -190,8 +188,8 @@ async def _register_and_login(client, session) -> dict[str, str]:
         display_name="E2E Editor",
         role="editor",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(user)
     await session.flush()
@@ -273,12 +271,8 @@ async def test_e2e_campaign_enqueue_persist_retrieve(
 
     # --- step 4: drive the worker, then poll the job to a terminal state ----
     # The fake only GENERATES (image-gen + disk); the REAL worker persists.
-    generate = _make_generating_process_campaign(
-        output_dir=gen_output_dir, image_backend=image_backend_mock
-    )
-    await fake_arq_pool.drive(
-        campaign_db_id, job_db_id, session=session, process_campaign=generate
-    )
+    generate = _make_generating_process_campaign(output_dir=gen_output_dir, image_backend=image_backend_mock)
+    await fake_arq_pool.drive(campaign_db_id, job_db_id, session=session, process_campaign=generate)
 
     job_resp = await client.get(f"{API}/jobs/{job_db_id}", headers=headers)
     assert job_resp.status_code == 200, job_resp.text
@@ -286,9 +280,7 @@ async def test_e2e_campaign_enqueue_persist_retrieve(
 
     # --- step 5: GET /campaigns/{id}/assets -> exactly 4 -------------------
     # [Fails today: pipeline persists no rows -> P3-T2.]
-    assets_resp = await client.get(
-        f"{API}/campaigns/{campaign_db_id}/assets", headers=headers
-    )
+    assets_resp = await client.get(f"{API}/campaigns/{campaign_db_id}/assets", headers=headers)
     assert assets_resp.status_code == 200, assets_resp.text
     assets = assets_resp.json()["data"]
     assert len(assets) == EXPECTED_ASSET_COUNT, (
@@ -314,9 +306,7 @@ async def test_e2e_campaign_enqueue_persist_retrieve(
     # uq_asset_variant race that P3-T1/T2 must handle via idempotent upsert.
     reprocess_job_ids: list[str] = []
     for _ in range(2):
-        rp = await client.post(
-            f"{API}/campaigns/{campaign_db_id}/reprocess", headers=headers
-        )
+        rp = await client.post(f"{API}/campaigns/{campaign_db_id}/reprocess", headers=headers)
         assert rp.status_code == 200, rp.text
         reprocess_job_ids.append(rp.json()["data"]["id"])
 
@@ -328,26 +318,19 @@ async def test_e2e_campaign_enqueue_persist_retrieve(
     # Drive both reprocess jobs (re-running generation against the same matrix).
     # Real worker persistence again -> idempotent upsert must keep exactly 4.
     for jid in reprocess_job_ids:
-        generate_again = _make_generating_process_campaign(
-            output_dir=gen_output_dir, image_backend=image_backend_mock
-        )
-        await fake_arq_pool.drive(
-            campaign_db_id, jid, session=session, process_campaign=generate_again
-        )
+        generate_again = _make_generating_process_campaign(output_dir=gen_output_dir, image_backend=image_backend_mock)
+        await fake_arq_pool.drive(campaign_db_id, jid, session=session, process_campaign=generate_again)
 
     # Final row set: exactly 4 distinct variants, NO duplicates.
     rows = (
-        (
-            await session.execute(
-                select(
-                    GeneratedAsset.product_id,
-                    GeneratedAsset.locale,
-                    GeneratedAsset.aspect_ratio,
-                ).where(GeneratedAsset.campaign_id == uuid.UUID(campaign_db_id))
-            )
+        await session.execute(
+            select(
+                GeneratedAsset.product_id,
+                GeneratedAsset.locale,
+                GeneratedAsset.aspect_ratio,
+            ).where(GeneratedAsset.campaign_id == uuid.UUID(campaign_db_id))
         )
-        .all()
-    )
+    ).all()
     assert len(rows) == EXPECTED_ASSET_COUNT, (
         f"reprocessing twice produced {len(rows)} rows; expected "
         f"{EXPECTED_ASSET_COUNT} with no duplicates (uq_asset_variant upsert)"

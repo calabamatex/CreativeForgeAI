@@ -1,11 +1,11 @@
 """Security tests for storage path handling."""
-import pytest
-from pathlib import Path
+
 from unittest.mock import patch
 
+import pytest
+from src.exceptions import StorageError
 from src.storage import StorageManager
 from src.storage_local import LocalStorageBackend
-from src.exceptions import StorageError
 
 
 class TestPathTraversalPrevention:

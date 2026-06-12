@@ -1,7 +1,7 @@
 """
 Tests for configuration management and environment variables.
 """
-import pytest
+
 import os
 
 
@@ -188,8 +188,8 @@ class TestConfig:
         config = reload_config()
 
         # These should have defaults even if not set
-        assert hasattr(config, 'ENABLE_CLAUDE_INTEGRATION')
-        assert hasattr(config, 'ENABLE_LOCALIZATION')
+        assert hasattr(config, "ENABLE_CLAUDE_INTEGRATION")
+        assert hasattr(config, "ENABLE_LOCALIZATION")
 
 
 class TestConfigIntegration:

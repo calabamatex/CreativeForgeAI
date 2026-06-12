@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List
 
 import aiofiles
 import structlog
@@ -48,9 +47,7 @@ class LocalStorageBackend(StorageBackend):
         # Real containment check (not string-prefix): rejects sibling-prefix
         # bypasses such as base ``/data/output`` vs ``/data/output-evil``.
         if resolved != base and not resolved.is_relative_to(base):
-            raise StorageError(
-                f"Resolved path escapes base directory: {key}"
-            )
+            raise StorageError(f"Resolved path escapes base directory: {key}")
         return resolved
 
     # ----- StorageBackend interface -----------------------------------------
@@ -71,9 +68,7 @@ class LocalStorageBackend(StorageBackend):
             )
             return key
         except OSError as exc:
-            raise StorageError(
-                f"Failed to save key '{key}': {exc}"
-            ) from exc
+            raise StorageError(f"Failed to save key '{key}': {exc}") from exc
 
     async def get(self, key: str) -> bytes:
         """Read the file identified by *key*."""
@@ -86,9 +81,7 @@ class LocalStorageBackend(StorageBackend):
             logger.debug("storage.local.get", key=key, size=len(data))
             return data
         except OSError as exc:
-            raise StorageError(
-                f"Failed to read key '{key}': {exc}"
-            ) from exc
+            raise StorageError(f"Failed to read key '{key}': {exc}") from exc
 
     async def delete(self, key: str) -> None:
         """Delete the file for *key*.  No error if already absent."""
@@ -100,9 +93,7 @@ class LocalStorageBackend(StorageBackend):
             else:
                 logger.debug("storage.local.delete_noop", key=key)
         except OSError as exc:
-            raise StorageError(
-                f"Failed to delete key '{key}': {exc}"
-            ) from exc
+            raise StorageError(f"Failed to delete key '{key}': {exc}") from exc
 
     async def get_url(self, key: str, expires_in: int = 3600) -> str:
         """Return a ``file://`` URL pointing at the asset.
@@ -116,13 +107,13 @@ class LocalStorageBackend(StorageBackend):
         logger.debug("storage.local.get_url", key=key, url=url)
         return url
 
-    async def list_keys(self, prefix: str) -> List[str]:
+    async def list_keys(self, prefix: str) -> list[str]:
         """Walk the local directory tree and return matching keys."""
         validate_storage_key(prefix.rstrip("/") or "campaigns")
         search_dir = self._resolve_path(prefix) if prefix else self._base_dir
         if not search_dir.is_dir():
             return []
-        keys: List[str] = []
+        keys: list[str] = []
         for root, _dirs, files in os.walk(search_dir):
             for name in files:
                 full = Path(root) / name

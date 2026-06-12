@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -87,14 +87,16 @@ class RegisterRequest(BaseModel):
     display_name: str = Field(..., min_length=2, max_length=100)
     role: UserRole = UserRole.VIEWER
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "email": "user@example.com",
-            "password": "secureP@ss1",
-            "display_name": "Jane Doe",
-            "role": "editor",
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "user@example.com",
+                "password": "secureP@ss1",
+                "display_name": "Jane Doe",
+                "role": "editor",
+            }
         }
-    })
+    )
 
 
 class LoginRequest(BaseModel):
@@ -132,6 +134,7 @@ class UserResponse(BaseModel):
 
 class CampaignCreateRequest(BaseModel):
     """Payload for creating a new campaign."""
+
     campaign_id: str = Field(..., min_length=1, max_length=100, description="Unique campaign identifier string")
     campaign_name: str = Field(..., min_length=1, max_length=255)
     brand_name: str = Field(..., min_length=1, max_length=255)
@@ -141,21 +144,24 @@ class CampaignCreateRequest(BaseModel):
     target_locales: list[str] = Field(default_factory=lambda: ["en-US"])
     aspect_ratios: list[str] = Field(default_factory=lambda: ["1:1", "9:16", "16:9"])
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "campaign_id": "SUMMER2026",
-            "campaign_name": "Summer 2026 Launch",
-            "brand_name": "TechStyle",
-            "image_backend": "firefly",
-            "brief": {"headline": "Summer Innovation", "cta": "Shop Now"},
-            "target_locales": ["en-US", "es-MX"],
-            "aspect_ratios": ["1:1", "16:9"],
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "campaign_id": "SUMMER2026",
+                "campaign_name": "Summer 2026 Launch",
+                "brand_name": "TechStyle",
+                "image_backend": "firefly",
+                "brief": {"headline": "Summer Innovation", "cta": "Shop Now"},
+                "target_locales": ["en-US", "es-MX"],
+                "aspect_ratios": ["1:1", "16:9"],
+            }
         }
-    })
+    )
 
 
 class CampaignUpdateRequest(BaseModel):
     """Partial-update payload for an existing campaign (draft only)."""
+
     campaign_name: str | None = Field(None, min_length=1, max_length=255)
     brief: dict[str, Any] | None = None
     target_locales: list[str] | None = None
@@ -165,6 +171,7 @@ class CampaignUpdateRequest(BaseModel):
 
 class CampaignResponse(BaseModel):
     """Full campaign representation returned by the API."""
+
     id: uuid.UUID
     campaign_id: str
     campaign_name: str
@@ -179,7 +186,7 @@ class CampaignResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     asset_count: int = 0
-    latest_job: Optional[JobResponse] = None
+    latest_job: JobResponse | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -229,11 +236,13 @@ class AssetResponse(BaseModel):
 class BrandCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "name": "TechStyle",
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "TechStyle",
+            }
         }
-    })
+    )
 
 
 class BrandUpdateRequest(BaseModel):

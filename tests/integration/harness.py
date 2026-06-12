@@ -24,12 +24,12 @@ from __future__ import annotations
 import os
 import struct
 import zlib
-from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import structlog
-
 from src.storage_backend import StorageBackend, validate_storage_key
 
 logger = structlog.get_logger(__name__)
@@ -52,12 +52,7 @@ def tiny_png_bytes(color: tuple[int, int, int] = (255, 0, 0)) -> bytes:
     """
 
     def _chunk(tag: bytes, data: bytes) -> bytes:
-        return (
-            struct.pack(">I", len(data))
-            + tag
-            + data
-            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-        )
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
 
     sig = b"\x89PNG\r\n\x1a\n"
     # 1x1, 8-bit, RGB (color type 2)
@@ -103,7 +98,7 @@ class FakeStorageBackend(StorageBackend):
     async def get_url(self, key: str, expires_in: int = 3600) -> str:
         return f"memory://{key}"
 
-    async def list_keys(self, prefix: str) -> List[str]:
+    async def list_keys(self, prefix: str) -> list[str]:
         return sorted(k for k in self._store if k.startswith(prefix))
 
     # -- test convenience (not part of the ABC) ---------------------------
@@ -112,7 +107,7 @@ class FakeStorageBackend(StorageBackend):
         return key in self._store
 
     @property
-    def keys(self) -> List[str]:
+    def keys(self) -> list[str]:
         return sorted(self._store)
 
     def __len__(self) -> int:
@@ -131,7 +126,7 @@ class EnqueuedJob:
     function_name: str
     args: tuple
     kwargs: dict
-    job_id: Optional[str]
+    job_id: str | None
     # True when an enqueue with the same _job_id was already recorded; ARQ
     # would return None (no new job) in that case. Mirrors that behaviour so
     # tests can assert dedupe.
@@ -165,11 +160,11 @@ class FakeArqPool:
     def __init__(
         self,
         *,
-        session_factory: Optional[Callable[[], Any]] = None,
-        storage_backend: Optional[StorageBackend] = None,
-        image_backend: Optional[Any] = None,
+        session_factory: Callable[[], Any] | None = None,
+        storage_backend: StorageBackend | None = None,
+        image_backend: Any | None = None,
     ) -> None:
-        self.enqueued: List[EnqueuedJob] = []
+        self.enqueued: list[EnqueuedJob] = []
         self._seen_job_ids: set[str] = set()
         # Resources made available to driven tasks via ctx / patching.
         self.session_factory = session_factory
@@ -182,9 +177,9 @@ class FakeArqPool:
         self,
         function_name: str,
         *args: Any,
-        _job_id: Optional[str] = None,
+        _job_id: str | None = None,
         **kwargs: Any,
-    ) -> Optional[EnqueuedJob]:
+    ) -> EnqueuedJob | None:
         deduped = _job_id is not None and _job_id in self._seen_job_ids
         record = EnqueuedJob(
             function_name=function_name,
@@ -204,10 +199,10 @@ class FakeArqPool:
 
     # -- introspection helpers --------------------------------------------
 
-    def jobs_for(self, function_name: str) -> List[EnqueuedJob]:
+    def jobs_for(self, function_name: str) -> list[EnqueuedJob]:
         return [j for j in self.enqueued if j.function_name == function_name]
 
-    def live_job_ids(self) -> List[str]:
+    def live_job_ids(self) -> list[str]:
         """Job ids that resulted in an actual (non-deduped) enqueue."""
         return [j.job_id for j in self.enqueued if j.job_id is not None and not j.deduped]
 
@@ -223,7 +218,7 @@ class FakeArqPool:
         job_id: str,
         *,
         session,
-        process_campaign: Optional[Callable[..., Any]] = None,
+        process_campaign: Callable[..., Any] | None = None,
     ) -> Any:
         """Run the real ``process_campaign_job`` coroutine in-process.
 
@@ -259,8 +254,9 @@ class FakeArqPool:
 
         # ``process_campaign_job`` imports these lazily from their source
         # modules, so patch them at the source (not on src.jobs.tasks).
-        with patch("src.db.base.async_session_factory", factory), patch(
-            "src.pipeline.CreativeAutomationPipeline", fake_pipeline_cls
+        with (
+            patch("src.db.base.async_session_factory", factory),
+            patch("src.pipeline.CreativeAutomationPipeline", fake_pipeline_cls),
         ):
             return await process_campaign_job(ctx, campaign_id, job_id)
 
@@ -292,7 +288,7 @@ class _NoCloseSessionCM:
         return False
 
 
-def _make_fake_pipeline_cls(process_campaign: Optional[Callable[..., Any]]):
+def _make_fake_pipeline_cls(process_campaign: Callable[..., Any] | None):
     """Build a stand-in for ``CreativeAutomationPipeline``.
 
     The real pipeline reaches out to image backends, Claude, and disk. For the
@@ -334,7 +330,7 @@ def _make_fake_pipeline_cls(process_campaign: Optional[Callable[..., Any]]):
     return _FakePipeline
 
 
-def make_image_backend_mock(png: Optional[bytes] = None) -> AsyncMock:
+def make_image_backend_mock(png: bytes | None = None) -> AsyncMock:
     """Return a mocked image-generation backend.
 
     ``generate_image(...)`` returns the supplied PNG (default
@@ -388,9 +384,7 @@ async def ensure_test_database(dev_url: str | None = None) -> str:
 
     conn = await asyncpg.connect(admin_dsn)
     try:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1", TEST_DB_NAME
-        )
+        exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", TEST_DB_NAME)
         if not exists:
             # asyncpg can't parametrise an identifier; TEST_DB_NAME is a fixed
             # constant, not user input.
@@ -440,9 +434,7 @@ def run_alembic_upgrade_on(test_url: str) -> None:
 
     project_root = Path(__file__).resolve().parents[2]
     cfg = Config(str(project_root / "alembic.ini"))
-    cfg.set_main_option(
-        "script_location", str(project_root / "src" / "db" / "migrations")
-    )
+    cfg.set_main_option("script_location", str(project_root / "src" / "db" / "migrations"))
     cfg.set_main_option("sqlalchemy.url", test_url)
 
     prev = os.environ.get("DATABASE_URL")

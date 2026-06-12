@@ -3,28 +3,21 @@
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from datetime import datetime, timezone
-
 from sqlalchemy import select
 
 from tests.integration.conftest import (
     CAMPAIGN_ID,
-    USER_ADMIN_ID,
-    USER_EDITOR_ID,
-    USER_VIEWER_ID,
     FakeScalarResult,
     _make_campaign,
     _make_job,
-    _make_user,
     admin_headers,
     editor_headers,
     viewer_headers,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,7 +53,7 @@ class TestListCampaigns:
         # Calls: (1) count query -> scalar_one(), (2) select campaigns -> .all() returns tuples
         _db_returning_sequence(
             mock_db,
-            2,                    # total count
+            2,  # total count
             [(c1, 0), (c2, 3)],  # campaign rows as (Campaign, asset_count) tuples
         )
 
@@ -82,8 +75,8 @@ class TestListCampaigns:
         # Calls: (1) count, (2) select with tuples
         _db_returning_sequence(
             mock_db,
-            1,              # count
-            [(draft, 0)],   # results as (Campaign, asset_count)
+            1,  # count
+            [(draft, 0)],  # results as (Campaign, asset_count)
         )
 
         resp = await ac.get("/api/v1/campaigns?status=draft")
@@ -387,8 +380,8 @@ async def _seed_editor_and_headers(session) -> dict[str, str]:
         display_name="Enqueue Editor",
         role="editor",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(user)
     await session.flush()
@@ -401,14 +394,12 @@ async def _seed_editor_and_headers(session) -> dict[str, str]:
 class TestEnqueueOnCreate:
     """POST /campaigns and /reprocess enqueue process_campaign_job (P3-T1)."""
 
-    async def test_create_enqueues_exactly_one_job_with_db_job_id(
-        self, real_app_client, fake_arq_pool
-    ):
+    async def test_create_enqueues_exactly_one_job_with_db_job_id(self, real_app_client, fake_arq_pool):
         """Creating a campaign enqueues exactly one job whose _job_id == db job id,
         and the Job row is committed (queryable) before/at enqueue time.
         """
-        from src.db.models import Job
         from src.api.dependencies import get_arq_pool
+        from src.db.models import Job
 
         client, session = real_app_client
         headers = await _seed_editor_and_headers(session)
@@ -452,17 +443,11 @@ class TestEnqueueOnCreate:
 
         # Commit-then-enqueue proof: the Job row is committed and queryable via a
         # FRESH query (not just pending in the unit-of-work).
-        row = (
-            await session.execute(
-                select(Job).where(Job.id == uuid.UUID(job_db_id))
-            )
-        ).scalar_one_or_none()
+        row = (await session.execute(select(Job).where(Job.id == uuid.UUID(job_db_id)))).scalar_one_or_none()
         assert row is not None
         assert row.status == "queued"
 
-    async def test_duplicate_enqueue_same_job_id_is_deduped(
-        self, real_app_client, fake_arq_pool
-    ):
+    async def test_duplicate_enqueue_same_job_id_is_deduped(self, real_app_client, fake_arq_pool):
         """A second enqueue with the same _job_id is deduped (not run twice)."""
         from src.api.dependencies import get_arq_pool
 
@@ -511,8 +496,8 @@ class TestEnqueueOnCreate:
         """Reprocessing a campaign enqueues exactly one job whose _job_id == db job id."""
         import uuid as _uuid
 
-        from src.db.models import Campaign
         from src.api.dependencies import get_arq_pool
+        from src.db.models import Campaign
 
         client, session = real_app_client
         headers = await _seed_editor_and_headers(session)
@@ -528,8 +513,8 @@ class TestEnqueueOnCreate:
             brief={"headline": "Go"},
             target_locales=["en-US"],
             aspect_ratios=["1:1"],
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         session.add(campaign)
         await session.flush()
@@ -571,7 +556,6 @@ class TestEnqueueOnCreate:
 import os as _os
 
 import pytest_asyncio
-
 from src.cache import RedisCache
 
 
@@ -646,9 +630,7 @@ class TestCampaignReadCache:
             assert resp1.status_code == 200
             assert mock_db.execute.call_count == 3
 
-            assert await real_cache.exists(
-                campaigns_route._detail_cache_key(CAMPAIGN_ID)
-            ) is True
+            assert await real_cache.exists(campaigns_route._detail_cache_key(CAMPAIGN_ID)) is True
 
             resp2 = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}")
             assert resp2.status_code == 200

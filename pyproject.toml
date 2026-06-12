@@ -83,10 +83,12 @@ addopts = [
 asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow",
-    "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests (real Postgres/Redis/MinIO, no paid APIs)",
+    "unit: marks tests as unit tests (no I/O, fully mocked)",
     "e2e: marks tests as end-to-end tests",
     "performance: marks tests as performance tests",
+    "paid: makes REAL paid provider calls (costs money). SKIPPED by default; set RUN_PAID_TESTS=1 to run.",
+    "paid_matrix: the full backend x locale x ratio worst-case matrix (~45 paid calls). NEVER in the default/PR-CI path; requires BOTH RUN_PAID_TESTS=1 and RUN_FULL_MATRIX=1.",
 ]
 
 [tool.coverage.run]
@@ -126,10 +128,38 @@ select = [
 ignore = [
     "E501",  # line too long (handled by formatter)
     "S101",  # assert used (needed in tests)
+    # FastAPI idiom: `param: T = Depends(...)` / `Query(...)` etc. evaluate the
+    # default at definition time on purpose. flake8-bugbear's B008 flags every
+    # route signature as a "function call in default argument" — a pure false
+    # positive for this codebase's FastAPI dependency-injection style.
+    "B008",
+    # We expose `CacheUnavailable` (and similar) as public, already-imported
+    # exception names. The `*Error` suffix nudge (N818) isn't worth churning
+    # every call site / import for.
+    "N818",
+    # `class X(str, Enum)` is used deliberately for JSON-serializable enums.
+    # UP042 would rewrite them to `enum.StrEnum`, which changes `str(member)` to
+    # return the bare value instead of `ClassName.MEMBER` — a runtime behavior
+    # change in serialization/logging we don't want as part of CI hardening.
+    "UP042",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "T20"]
+# Tests legitimately use hardcoded fake passwords/tokens (S105/S106), temp dirs
+# under /tmp (S108), assert (S101), and print (T20). The full flake8-bandit (S)
+# suite is noise in the test tree; keep it enforced in `src/`. E402 is allowed
+# because several test modules import deliberately late — after env/SECRET_KEY
+# setup or after explanatory section banners.
+"tests/**/*.py" = ["S", "T20", "E402"]
+# Pydantic v2 `@field_validator` methods take `cls` as the first arg by
+# convention; ruff's N805 ("first arg should be self") is a false positive here.
+"src/models/**/*.py" = ["N805"]
+# `token_type: str = "bearer"` is an OAuth2 response field name, not a secret —
+# S105's "possible hardcoded password" heuristic misfires on the literal.
+"src/api/schemas.py" = ["S105"]
+# `cache.close()` swallows shutdown errors on a best-effort connection teardown;
+# S110 (try/except/pass) is acceptable for idempotent cleanup.
+"src/cache.py" = ["S110"]
 
 [tool.ruff.format]
 quote-style = "double"

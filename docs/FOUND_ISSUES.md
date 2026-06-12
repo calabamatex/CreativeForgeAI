@@ -32,14 +32,24 @@ the `S3_*` names explicitly. `src/storage_s3.py:35-57`.
 
 ## P1 (discovered during Phase 1)
 
-### `test_cli.py::test_validate_config_command` fails in the FULL suite, passes in isolation — PRE-EXISTING, deferred to P6
-Confirmed pre-existing (fails identically on `phase-0-baseline`, before any Phase 1
-change). The test passes when run alone but exits 1 in a full `pytest` run — a
-test-isolation/ordering bug: `validate-config` reads a module-level `Config`
-singleton (`src/config.py`) and another test pollutes `os.environ` / the singleton,
-so the image-backend check fails out of order. Not a Phase 1 regression. Belongs to
-the P6 test-taxonomy/conftest work (isolate config state per test).
+### `test_cli.py::test_validate_config_command` fails in the FULL suite, passes in isolation — FIXED in P6-T1
+**FIXED (P6-T1):** Root cause was process-global config state leaking across
+tests — `validate-config` reads the module-level `Config` singleton
+(`src/config.py`), and other tests mutate `os.environ` / reset `config._config`,
+so it failed out of order. Fixed with an autouse fixture
+`_isolate_env_and_config` in `tests/conftest.py` that, around EVERY test:
+(1) snapshots `os.environ`, (2) applies a deterministic baseline of fake test API
+keys + backend so config-dependent tests are order-independent (they previously
+relied on leaked keys), (3) resets the `src.config` singleton to rebuild fresh,
+and (4) at teardown restores the exact original env and drops the singleton.
+`test_validate_config_command` now PASSES in the full suite repeatedly (full suite
+2x: 523 passed / 1 skipped / 0 failed each). `tests/conftest.py`,
 `tests/test_cli.py::TestCLI::test_validate_config_command`.
+
+Originally: Confirmed pre-existing (failed identically on `phase-0-baseline`,
+before any Phase 1 change). The test passed alone but exited 1 in a full `pytest`
+run — a test-isolation/ordering bug. Not a Phase 1 regression; deferred to the P6
+test-taxonomy/conftest work.
 
 ### Residual `Adobe` branding + unsubstantiated "patent-pending" claim in README — NOTED
 After the P1-T4 honesty pass, `README.md` still carries legacy `Adobe` /
@@ -136,9 +146,18 @@ a non-owner (and non-admin) is closed with **4403**. Admins may stream any job.
 Covered by `tests/integration/test_api_ws.py` (missing/invalid/revoked token,
 owner streams, non-owner 4403, admin override).
 
-### P3-T4 WebSocket test is timing-flaky — DEFERRED to P6
+### P3-T4 WebSocket test is timing-flaky — FIXED in P6-T1
+**FIXED (P6-T1):** Made
 `tests/integration/test_api_ws.py::test_ws_streams_real_progress_then_closes_on_terminal`
-drives job-state changes against a 0.5s poll loop from the same event loop; it
-occasionally flakes on timing (passes in isolation and on rerun). Not a product
-bug — a test-reliability issue (drive the poll deterministically rather than racing
-wall-clock). Belongs to the P6 test-taxonomy work. `tests/integration/test_api_ws.py`.
+deterministic. The old version mutated the job row on a fixed `asyncio.sleep(0.6)`
+cadence in a background task, RACING the server's 0.5s poll loop, so a transition
+occasionally landed between two polls and a frame was missed/merged. The endpoint
+now reads its poll interval at connection time from `WS_POLL_INTERVAL_SECONDS`
+(`src/api/routes/ws.py`, `_poll_interval_seconds()`); the test sets it to ~10ms and
+drives each state transition IN LOCKSTEP with the received frames (read the next
+CHANGED frame → apply the next transition → repeat). Because the endpoint emits
+only on a changed `(progress, stage, status)` signature, advancing strictly after
+observing the prior frame guarantees every distinct state is seen once, in order —
+no wall-clock race. Asserts unchanged (real progress fields + monotonic + terminal
+`completed` at 100 + socket close). Stable 10/10 in a repeat loop.
+`tests/integration/test_api_ws.py`, `src/api/routes/ws.py`.

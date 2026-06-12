@@ -1,9 +1,10 @@
 """SQLAlchemy async engine, session factory, and declarative base."""
 
 import os
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import AsyncGenerator
 
+import structlog
 from sqlalchemy.ext.asyncio import (
     AsyncAttrs,
     AsyncEngine,
@@ -12,7 +13,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -82,9 +82,7 @@ def _run_alembic_upgrade() -> None:
 
     cfg = Config(str(_ALEMBIC_INI))
     # Make script_location absolute so the upgrade works regardless of CWD.
-    cfg.set_main_option(
-        "script_location", str(_PROJECT_ROOT / "src" / "db" / "migrations")
-    )
+    cfg.set_main_option("script_location", str(_PROJECT_ROOT / "src" / "db" / "migrations"))
     cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
     command.upgrade(cfg, "head")
 

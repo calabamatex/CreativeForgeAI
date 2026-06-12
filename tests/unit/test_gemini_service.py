@@ -1,9 +1,9 @@
 """Tests for Gemini image generation service."""
-import pytest
-import base64
-import json
-from unittest.mock import patch, AsyncMock, MagicMock
 
+import base64
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from src.genai.gemini_service import GeminiImageService
 from src.models import ComprehensiveBrandGuidelines
 
@@ -102,9 +102,7 @@ class TestGenerateImage:
     @pytest.mark.asyncio
     async def test_successful_generation(self, gemini_service):
         fake_image = b"fake-image-bytes"
-        fake_response_data = {
-            "predictions": [{"bytesBase64Encoded": base64.b64encode(fake_image).decode()}]
-        }
+        fake_response_data = {"predictions": [{"bytesBase64Encoded": base64.b64encode(fake_image).decode()}]}
 
         mock_response = AsyncMock()
         mock_response.status = 200
@@ -161,9 +159,7 @@ class TestGenerateImage:
         )
 
         fake_image = b"branded-image"
-        fake_response_data = {
-            "predictions": [{"bytesBase64Encoded": base64.b64encode(fake_image).decode()}]
-        }
+        fake_response_data = {"predictions": [{"bytesBase64Encoded": base64.b64encode(fake_image).decode()}]}
 
         mock_response = AsyncMock()
         mock_response.status = 200

@@ -1,11 +1,11 @@
 """
 Tests for document parsers (brand guidelines and localization rules).
 """
-import pytest
-from unittest.mock import Mock, patch, mock_open, MagicMock, AsyncMock
+
 import json
-import yaml
-from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+
+import pytest
 
 
 class TestBrandGuidelinesParser:
@@ -14,8 +14,8 @@ class TestBrandGuidelinesParser:
     @pytest.mark.asyncio
     async def test_parse_markdown_file(self, brand_guidelines_text, mock_claude_response):
         """Test parsing brand guidelines from markdown."""
-        from src.parsers.brand_parser import BrandGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.brand_parser import BrandGuidelinesParser
 
         # Create mock guidelines result
         extracted = {
@@ -23,18 +23,20 @@ class TestBrandGuidelinesParser:
             "primary_colors": ["#0066CC", "#1A1A1A"],
             "primary_font": "Montserrat",
             "brand_voice": "Professional",
-            "photography_style": "Modern"
+            "photography_style": "Modern",
         }
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('builtins.open', mock_open(read_data=brand_guidelines_text)):
-                with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=brand_guidelines_text)):
+                with patch("aiohttp.ClientSession.post") as mock_post:
                     mock_response = AsyncMock()
                     mock_response.status = 200
-                    mock_response.json = AsyncMock(return_value={
-                        'content': [{'text': json.dumps(extracted)}],
-                        'usage': {'input_tokens': 100, 'output_tokens': 50}
-                    })
+                    mock_response.json = AsyncMock(
+                        return_value={
+                            "content": [{"text": json.dumps(extracted)}],
+                            "usage": {"input_tokens": 100, "output_tokens": 50},
+                        }
+                    )
                     mock_post.return_value.__aenter__.return_value = mock_response
 
                     claude = ClaudeService()
@@ -47,26 +49,28 @@ class TestBrandGuidelinesParser:
     @pytest.mark.asyncio
     async def test_parse_with_claude(self, brand_guidelines_text):
         """Test parsing with Claude API."""
-        from src.parsers.brand_parser import BrandGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.brand_parser import BrandGuidelinesParser
 
         extracted = {
             "source_file": "test.md",
             "primary_colors": ["#0066CC", "#1A1A1A"],
             "primary_font": "Montserrat",
             "brand_voice": "Professional",
-            "photography_style": "Modern"
+            "photography_style": "Modern",
         }
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('builtins.open', mock_open(read_data=brand_guidelines_text)):
-                with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=brand_guidelines_text)):
+                with patch("aiohttp.ClientSession.post") as mock_post:
                     mock_response = AsyncMock()
                     mock_response.status = 200
-                    mock_response.json = AsyncMock(return_value={
-                        'content': [{'text': json.dumps(extracted)}],
-                        'usage': {'input_tokens': 100, 'output_tokens': 50}
-                    })
+                    mock_response.json = AsyncMock(
+                        return_value={
+                            "content": [{"text": json.dumps(extracted)}],
+                            "usage": {"input_tokens": 100, "output_tokens": 50},
+                        }
+                    )
                     mock_post.return_value.__aenter__.return_value = mock_response
 
                     claude = ClaudeService()
@@ -79,14 +83,14 @@ class TestBrandGuidelinesParser:
     @pytest.mark.asyncio
     async def test_parse_pdf_file(self, brand_guidelines_text):
         """Test parsing brand guidelines from PDF."""
-        from src.parsers.brand_parser import BrandGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.brand_parser import BrandGuidelinesParser
 
         extracted = {
             "source_file": "test.pdf",
             "primary_colors": ["#0066CC"],
             "primary_font": "Arial",
-            "brand_voice": "Professional"
+            "brand_voice": "Professional",
         }
 
         # Mock PyMuPDF
@@ -96,15 +100,17 @@ class TestBrandGuidelinesParser:
         mock_doc.__enter__.return_value = [mock_page]
         mock_doc.__exit__.return_value = None
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('fitz.open', return_value=mock_doc):
-                with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("fitz.open", return_value=mock_doc):
+                with patch("aiohttp.ClientSession.post") as mock_post:
                     mock_response = AsyncMock()
                     mock_response.status = 200
-                    mock_response.json = AsyncMock(return_value={
-                        'content': [{'text': json.dumps(extracted)}],
-                        'usage': {'input_tokens': 100, 'output_tokens': 50}
-                    })
+                    mock_response.json = AsyncMock(
+                        return_value={
+                            "content": [{"text": json.dumps(extracted)}],
+                            "usage": {"input_tokens": 100, "output_tokens": 50},
+                        }
+                    )
                     mock_post.return_value.__aenter__.return_value = mock_response
 
                     claude = ClaudeService()
@@ -117,14 +123,10 @@ class TestBrandGuidelinesParser:
     @pytest.mark.asyncio
     async def test_parse_docx_file(self, brand_guidelines_text):
         """Test parsing brand guidelines from DOCX."""
-        from src.parsers.brand_parser import BrandGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.brand_parser import BrandGuidelinesParser
 
-        extracted = {
-            "source_file": "test.docx",
-            "primary_colors": ["#0066CC"],
-            "primary_font": "Montserrat"
-        }
+        extracted = {"source_file": "test.docx", "primary_colors": ["#0066CC"], "primary_font": "Montserrat"}
 
         # Mock python-docx
         mock_para = MagicMock()
@@ -132,15 +134,17 @@ class TestBrandGuidelinesParser:
         mock_doc = MagicMock()
         mock_doc.paragraphs = [mock_para]
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('docx.Document', return_value=mock_doc):
-                with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("docx.Document", return_value=mock_doc):
+                with patch("aiohttp.ClientSession.post") as mock_post:
                     mock_response = AsyncMock()
                     mock_response.status = 200
-                    mock_response.json = AsyncMock(return_value={
-                        'content': [{'text': json.dumps(extracted)}],
-                        'usage': {'input_tokens': 100, 'output_tokens': 50}
-                    })
+                    mock_response.json = AsyncMock(
+                        return_value={
+                            "content": [{"text": json.dumps(extracted)}],
+                            "usage": {"input_tokens": 100, "output_tokens": 50},
+                        }
+                    )
                     mock_post.return_value.__aenter__.return_value = mock_response
 
                     claude = ClaudeService()
@@ -157,11 +161,11 @@ class TestLocalizationGuidelinesParser:
     @pytest.mark.asyncio
     async def test_parse_yaml_file(self, localization_rules_yaml):
         """Test parsing YAML localization rules."""
-        from src.parsers.localization_parser import LocalizationGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.localization_parser import LocalizationGuidelinesParser
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('builtins.open', mock_open(read_data=localization_rules_yaml)):
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=localization_rules_yaml)):
                 parser = LocalizationGuidelinesParser(ClaudeService())
                 result = await parser.parse("test.yaml")
 
@@ -172,19 +176,17 @@ class TestLocalizationGuidelinesParser:
     @pytest.mark.asyncio
     async def test_parse_json_file(self):
         """Test parsing JSON localization rules."""
-        from src.parsers.localization_parser import LocalizationGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.localization_parser import LocalizationGuidelinesParser
 
         json_data = {
-            "market_specific_rules": {
-                "en-US": {"tone": "casual"}
-            },
+            "market_specific_rules": {"en-US": {"tone": "casual"}},
             "prohibited_terms": {},
-            "translation_glossary": {}
+            "translation_glossary": {},
         }
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('builtins.open', mock_open(read_data=json.dumps(json_data))):
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=json.dumps(json_data))):
                 parser = LocalizationGuidelinesParser(ClaudeService())
                 result = await parser.parse("test.json")
 
@@ -194,11 +196,11 @@ class TestLocalizationGuidelinesParser:
     @pytest.mark.asyncio
     async def test_parse_yaml_structure(self, localization_rules_yaml):
         """Test parsing structured YAML format."""
-        from src.parsers.localization_parser import LocalizationGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.localization_parser import LocalizationGuidelinesParser
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('builtins.open', mock_open(read_data=localization_rules_yaml)):
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=localization_rules_yaml)):
                 parser = LocalizationGuidelinesParser(ClaudeService())
                 result = await parser.parse("test.yaml")
 
@@ -209,8 +211,8 @@ class TestLocalizationGuidelinesParser:
     @pytest.mark.asyncio
     async def test_parse_markdown_with_claude(self):
         """Test parsing markdown localization rules with Claude."""
-        from src.parsers.localization_parser import LocalizationGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.localization_parser import LocalizationGuidelinesParser
 
         markdown_text = """
         # Localization Rules
@@ -221,23 +223,22 @@ class TestLocalizationGuidelinesParser:
 
         extracted = {
             "source_file": "test.md",
-            "market_specific_rules": {
-                "en-US": {"tone": "casual"},
-                "es-MX": {"tone": "formal"}
-            },
+            "market_specific_rules": {"en-US": {"tone": "casual"}, "es-MX": {"tone": "formal"}},
             "prohibited_terms": {},
-            "translation_glossary": {}
+            "translation_glossary": {},
         }
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('builtins.open', mock_open(read_data=markdown_text)):
-                with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=markdown_text)):
+                with patch("aiohttp.ClientSession.post") as mock_post:
                     mock_response = AsyncMock()
                     mock_response.status = 200
-                    mock_response.json = AsyncMock(return_value={
-                        'content': [{'text': json.dumps(extracted)}],
-                        'usage': {'input_tokens': 100, 'output_tokens': 50}
-                    })
+                    mock_response.json = AsyncMock(
+                        return_value={
+                            "content": [{"text": json.dumps(extracted)}],
+                            "usage": {"input_tokens": 100, "output_tokens": 50},
+                        }
+                    )
                     mock_post.return_value.__aenter__.return_value = mock_response
 
                     claude = ClaudeService()
@@ -254,26 +255,28 @@ class TestParserIntegration:
     @pytest.mark.asyncio
     async def test_brand_parser_full_workflow(self, brand_guidelines_text):
         """Test complete brand parsing workflow."""
-        from src.parsers.brand_parser import BrandGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.brand_parser import BrandGuidelinesParser
 
         extracted = {
             "source_file": "test.md",
             "primary_colors": ["#0066CC"],
             "primary_font": "Montserrat",
             "brand_voice": "Professional",
-            "photography_style": "Modern minimalist"
+            "photography_style": "Modern minimalist",
         }
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('builtins.open', mock_open(read_data=brand_guidelines_text)):
-                with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=brand_guidelines_text)):
+                with patch("aiohttp.ClientSession.post") as mock_post:
                     mock_response = AsyncMock()
                     mock_response.status = 200
-                    mock_response.json = AsyncMock(return_value={
-                        'content': [{'text': json.dumps(extracted)}],
-                        'usage': {'input_tokens': 100, 'output_tokens': 50}
-                    })
+                    mock_response.json = AsyncMock(
+                        return_value={
+                            "content": [{"text": json.dumps(extracted)}],
+                            "usage": {"input_tokens": 100, "output_tokens": 50},
+                        }
+                    )
                     mock_post.return_value.__aenter__.return_value = mock_response
 
                     claude = ClaudeService()
@@ -286,11 +289,11 @@ class TestParserIntegration:
     @pytest.mark.asyncio
     async def test_localization_parser_full_workflow(self, localization_rules_yaml):
         """Test complete localization parsing workflow."""
-        from src.parsers.localization_parser import LocalizationGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.localization_parser import LocalizationGuidelinesParser
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('builtins.open', mock_open(read_data=localization_rules_yaml)):
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=localization_rules_yaml)):
                 parser = LocalizationGuidelinesParser(ClaudeService())
                 result = await parser.parse("test.yaml")
 
@@ -312,25 +315,27 @@ class TestParserIntegration:
     @pytest.mark.asyncio
     async def test_parser_handles_empty_file(self):
         """Test parser handles empty guideline files."""
-        from src.parsers.brand_parser import BrandGuidelinesParser
         from src.genai.claude import ClaudeService
+        from src.parsers.brand_parser import BrandGuidelinesParser
 
         extracted = {
             "source_file": "empty.md",
             "primary_colors": [],
             "primary_font": "Arial",
-            "brand_voice": "Professional"
+            "brand_voice": "Professional",
         }
 
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('builtins.open', mock_open(read_data="")):
-                with patch('aiohttp.ClientSession.post') as mock_post:
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data="")):
+                with patch("aiohttp.ClientSession.post") as mock_post:
                     mock_response = AsyncMock()
                     mock_response.status = 200
-                    mock_response.json = AsyncMock(return_value={
-                        'content': [{'text': json.dumps(extracted)}],
-                        'usage': {'input_tokens': 10, 'output_tokens': 20}
-                    })
+                    mock_response.json = AsyncMock(
+                        return_value={
+                            "content": [{"text": json.dumps(extracted)}],
+                            "usage": {"input_tokens": 10, "output_tokens": 20},
+                        }
+                    )
                     mock_post.return_value.__aenter__.return_value = mock_response
 
                     claude = ClaudeService()

@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock, patch
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 # Ensure SECRET_KEY is set before importing the dependencies module,
 # which validates the env var at import time.
@@ -29,15 +30,13 @@ os.environ.setdefault(
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-
 from src.api.dependencies import (
-    SECRET_KEY,
-    ALGORITHM,
+    ALGORITHM,  # noqa: F401  re-exported for tests/integration/test_api_auth.py
+    check_rate_limit,
     create_access_token,
     create_refresh_token,
-    get_db,
     get_current_user,
-    check_rate_limit,
+    get_db,
 )
 
 # ---------------------------------------------------------------------------
@@ -53,7 +52,7 @@ BRAND_ID = uuid.UUID("20000000-0000-0000-0000-000000000001")
 ASSET_ID = uuid.UUID("30000000-0000-0000-0000-000000000001")
 JOB_ID = uuid.UUID("40000000-0000-0000-0000-000000000001")
 
-NOW = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -408,10 +407,12 @@ from sqlalchemy.ext.asyncio import (  # noqa: E402
 from tests.integration.harness import (  # noqa: E402
     FakeArqPool,
     FakeStorageBackend,
-    ensure_test_database,
     drop_test_database,
+    ensure_test_database,
     make_image_backend_mock,
     run_alembic_upgrade_on,
+)
+from tests.integration.harness import (
     tiny_png_bytes as _tiny_png_bytes,
 )
 
@@ -564,10 +565,9 @@ def patch_storage_factory(fake_storage_backend):
     import src.storage_factory as sf
 
     sf.get_default_storage_backend.cache_clear()
-    with _patch.object(
-        sf, "get_storage_backend", return_value=fake_storage_backend
-    ), _patch.object(
-        sf, "get_default_storage_backend", return_value=fake_storage_backend
+    with (
+        _patch.object(sf, "get_storage_backend", return_value=fake_storage_backend),
+        _patch.object(sf, "get_default_storage_backend", return_value=fake_storage_backend),
     ):
         yield fake_storage_backend
     sf.get_default_storage_backend.cache_clear()

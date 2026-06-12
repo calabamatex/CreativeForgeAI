@@ -40,11 +40,12 @@ the frontend itself is out of scope here (Phase 5).
 """
 
 import asyncio
+import os
 import uuid
 
+import structlog
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 from src.api.dependencies import get_db, resolve_access_token_user
 from src.api.errors import AuthenticationError
@@ -80,12 +81,33 @@ async def _authenticate_ws(websocket: WebSocket, db: AsyncSession):
         raise AuthenticationError("Missing authentication token")
     return await resolve_access_token_user(token, db)
 
+
 # Terminal job states: once a job reaches one of these we emit it and close.
 TERMINAL_STATES: frozenset[str] = frozenset({"completed", "failed", "cancelled"})
 
 # Poll the job row every 0.5s. Small enough to feel real-time, large enough not
-# to hammer the DB.
+# to hammer the DB. Overridable via the ``WS_POLL_INTERVAL_SECONDS`` env var so
+# tests can shrink it and synchronize on emitted frames instead of racing
+# wall-clock (see tests/integration/test_api_ws.py). Read at connection time
+# (not import time) so a test can set it before opening the socket.
 POLL_INTERVAL_SECONDS: float = 0.5
+
+
+def _poll_interval_seconds() -> float:
+    """Return the per-poll sleep, honoring a ``WS_POLL_INTERVAL_SECONDS`` override.
+
+    Defaults to :data:`POLL_INTERVAL_SECONDS`. A malformed override falls back
+    to the default rather than crashing the socket.
+    """
+    raw = os.getenv("WS_POLL_INTERVAL_SECONDS")
+    if not raw:
+        return POLL_INTERVAL_SECONDS
+    try:
+        value = float(raw)
+        return value if value > 0 else POLL_INTERVAL_SECONDS
+    except ValueError:
+        return POLL_INTERVAL_SECONDS
+
 
 # Hard cap on poll iterations so the loop can NEVER run forever (backpressure /
 # safety guard). 600 * 0.5s = 5 minutes of wall-clock before we force-close a
@@ -197,6 +219,7 @@ async def generation_progress(
             return
 
     last_signature: tuple | None = None
+    poll_interval = _poll_interval_seconds()
 
     try:
         for _ in range(MAX_POLL_ITERATIONS):
@@ -227,12 +250,10 @@ async def generation_progress(
             if job.status in TERMINAL_STATES:
                 # Terminal: we've already emitted this state above; close.
                 await websocket.close()
-                logger.info(
-                    "ws.closed.terminal", job_id=job_id, status=job.status
-                )
+                logger.info("ws.closed.terminal", job_id=job_id, status=job.status)
                 return
 
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            await asyncio.sleep(poll_interval)
 
         # Exhausted the poll budget without reaching a terminal state: force a
         # clean close rather than hanging the client forever.

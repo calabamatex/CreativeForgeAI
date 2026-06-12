@@ -2,7 +2,6 @@
 
 import platform
 from dataclasses import dataclass
-from typing import List, Dict
 
 from src.models import TechnicalMetrics
 
@@ -22,18 +21,19 @@ from src.models import TechnicalMetrics
 @dataclass
 class RawMetricData:
     """Raw data collected during pipeline execution for metrics computation."""
+
     backend: str
     total_api_calls: int
     cache_hits: int
     cache_misses: int
     retry_count: int
-    retry_reasons: List[str]
-    api_response_times: List[float]
+    retry_reasons: list[str]
+    api_response_times: list[float]
     image_processing_total_ms: float
     localization_total_ms: float
     compliance_check_total_ms: float
     peak_memory_mb: float
-    full_error_traces: List[Dict[str, str]]
+    full_error_traces: list[dict[str, str]]
 
 
 def compute_technical_metrics(data: RawMetricData) -> TechnicalMetrics:
@@ -44,9 +44,7 @@ def compute_technical_metrics(data: RawMetricData) -> TechnicalMetrics:
         else 0.0
     )
     avg_api_response_time = (
-        sum(data.api_response_times) / len(data.api_response_times)
-        if data.api_response_times
-        else 0.0
+        sum(data.api_response_times) / len(data.api_response_times) if data.api_response_times else 0.0
     )
     min_api_response_time = min(data.api_response_times) if data.api_response_times else 0.0
     max_api_response_time = max(data.api_response_times) if data.api_response_times else 0.0
@@ -77,5 +75,3 @@ def compute_technical_metrics(data: RawMetricData) -> TechnicalMetrics:
         system_info=system_info,
         full_error_traces=data.full_error_traces,
     )
-
-

@@ -2,8 +2,10 @@
 Comprehensive tests for Pydantic data models.
 Tests validation, serialization, and model constraints.
 """
-import pytest
+
 from datetime import datetime
+
+import pytest
 from pydantic import ValidationError
 
 
@@ -28,7 +30,7 @@ class TestProduct:
             product_id="MIN-001",
             product_name="Minimal Product",
             product_description="Description",
-            product_category="Category"
+            product_category="Category",
         )
 
         assert product.key_features == []
@@ -44,10 +46,7 @@ class TestProduct:
             product_name="Product with Assets",
             product_description="Description",
             product_category="Category",
-            existing_assets={
-                "hero": "/path/to/hero.jpg",
-                "logo": "/path/to/logo.png"
-            }
+            existing_assets={"hero": "/path/to/hero.jpg", "logo": "/path/to/logo.png"},
         )
 
         assert "hero" in product.existing_assets
@@ -64,7 +63,7 @@ class TestProduct:
             product_name="Custom Product",
             product_description="Description",
             product_category="Category",
-            generation_prompt=custom_prompt
+            generation_prompt=custom_prompt,
         )
 
         assert product.generation_prompt == custom_prompt
@@ -88,11 +87,7 @@ class TestCampaignMessage:
         """Test campaign message with default locale."""
         from src.models import CampaignMessage
 
-        message = CampaignMessage(
-            headline="Headline",
-            subheadline="Subheadline",
-            cta="CTA"
-        )
+        message = CampaignMessage(headline="Headline", subheadline="Subheadline", cta="CTA")
 
         assert message.locale == "en-US"
 
@@ -101,11 +96,7 @@ class TestCampaignMessage:
         from src.models import CampaignMessage
 
         with pytest.raises(ValidationError) as exc_info:
-            CampaignMessage(
-                headline="",
-                subheadline="Sub",
-                cta="CTA"
-            )
+            CampaignMessage(headline="", subheadline="Sub", cta="CTA")
 
         assert "headline" in str(exc_info.value)
 
@@ -116,12 +107,7 @@ class TestCampaignMessage:
         locales = ["en-US", "es-MX", "fr-CA", "pt-BR", "de-DE"]
 
         for locale in locales:
-            message = CampaignMessage(
-                locale=locale,
-                headline="Headline",
-                subheadline="Sub",
-                cta="CTA"
-            )
+            message = CampaignMessage(locale=locale, headline="Headline", subheadline="Sub", cta="CTA")
             assert message.locale == locale
 
 
@@ -138,9 +124,7 @@ class TestComprehensiveBrandGuidelines:
         """Test brand guidelines with minimal required fields."""
         from src.models import ComprehensiveBrandGuidelines
 
-        guidelines = ComprehensiveBrandGuidelines(
-            source_file="minimal.pdf"
-        )
+        guidelines = ComprehensiveBrandGuidelines(source_file="minimal.pdf")
 
         assert guidelines.primary_colors == []
         assert guidelines.primary_font == "Arial"  # Default
@@ -162,7 +146,7 @@ class TestComprehensiveBrandGuidelines:
             logo_min_size=100,
             prohibited_uses=["No dark backgrounds"],
             prohibited_elements=["No gradients"],
-            approved_taglines=["Tagline 1", "Tagline 2"]
+            approved_taglines=["Tagline 1", "Tagline 2"],
         )
 
         assert len(guidelines.primary_colors) == 2
@@ -183,9 +167,7 @@ class TestLocalizationGuidelines:
         """Test localization guidelines with minimal fields."""
         from src.models import LocalizationGuidelines
 
-        guidelines = LocalizationGuidelines(
-            source_file="minimal.yaml"
-        )
+        guidelines = LocalizationGuidelines(source_file="minimal.yaml")
 
         assert guidelines.supported_locales == []
         assert guidelines.market_specific_rules == {}
@@ -199,8 +181,8 @@ class TestLocalizationGuidelines:
             source_file="test.yaml",
             market_specific_rules={
                 "en-US": {"tone": "casual", "formality": "informal"},
-                "es-MX": {"tone": "warm", "formality": "formal"}
-            }
+                "es-MX": {"tone": "warm", "formality": "formal"},
+            },
         )
 
         assert "en-US" in guidelines.market_specific_rules
@@ -211,11 +193,7 @@ class TestLocalizationGuidelines:
         from src.models import LocalizationGuidelines
 
         guidelines = LocalizationGuidelines(
-            source_file="test.yaml",
-            prohibited_terms={
-                "en-US": ["cheap", "discount"],
-                "es-MX": ["barato"]
-            }
+            source_file="test.yaml", prohibited_terms={"en-US": ["cheap", "discount"], "es-MX": ["barato"]}
         )
 
         assert len(guidelines.prohibited_terms["en-US"]) == 2
@@ -248,11 +226,9 @@ class TestCampaignBrief:
                 campaign_id="TEST",
                 campaign_name="Test",
                 brand_name="Brand",
-                campaign_message=CampaignMessage(
-                    headline="H", subheadline="S", cta="C"
-                ),
+                campaign_message=CampaignMessage(headline="H", subheadline="S", cta="C"),
                 products=[Product(**example_product)],
-                image_generation_backend=backend
+                image_generation_backend=backend,
             )
             # Backend should be normalized to lowercase
             assert brief.image_generation_backend in valid_backends
@@ -266,11 +242,9 @@ class TestCampaignBrief:
                 campaign_id="TEST",
                 campaign_name="Test",
                 brand_name="Brand",
-                campaign_message=CampaignMessage(
-                    headline="H", subheadline="S", cta="C"
-                ),
+                campaign_message=CampaignMessage(headline="H", subheadline="S", cta="C"),
                 products=[],
-                image_generation_backend="invalid_backend"
+                image_generation_backend="invalid_backend",
             )
 
         assert "image_generation_backend" in str(exc_info.value)
@@ -285,11 +259,9 @@ class TestCampaignBrief:
             campaign_id="TEST",
             campaign_name="Test",
             brand_name="Brand",
-            campaign_message=CampaignMessage(
-                headline="H", subheadline="S", cta="C"
-            ),
+            campaign_message=CampaignMessage(headline="H", subheadline="S", cta="C"),
             products=[Product(**example_product)],
-            aspect_ratios=valid_ratios
+            aspect_ratios=valid_ratios,
         )
 
         assert len(brief.aspect_ratios) == 4
@@ -303,11 +275,9 @@ class TestCampaignBrief:
                 campaign_id="TEST",
                 campaign_name="Test",
                 brand_name="Brand",
-                campaign_message=CampaignMessage(
-                    headline="H", subheadline="S", cta="C"
-                ),
+                campaign_message=CampaignMessage(headline="H", subheadline="S", cta="C"),
                 products=[],
-                aspect_ratios=["1:1", "invalid:ratio"]
+                aspect_ratios=["1:1", "invalid:ratio"],
             )
 
         assert "aspect_ratios" in str(exc_info.value)
@@ -320,10 +290,8 @@ class TestCampaignBrief:
             campaign_id="TEST",
             campaign_name="Test",
             brand_name="Brand",
-            campaign_message=CampaignMessage(
-                headline="H", subheadline="S", cta="C"
-            ),
-            products=[Product(**example_product)]
+            campaign_message=CampaignMessage(headline="H", subheadline="S", cta="C"),
+            products=[Product(**example_product)],
         )
 
         assert brief.aspect_ratios == ["1:1", "9:16", "16:9"]
@@ -340,12 +308,10 @@ class TestCampaignBrief:
             campaign_id="TEST",
             campaign_name="Test",
             brand_name="Brand",
-            campaign_message=CampaignMessage(
-                headline="H", subheadline="S", cta="C"
-            ),
+            campaign_message=CampaignMessage(headline="H", subheadline="S", cta="C"),
             products=[Product(**example_product)],
             brand_guidelines_file="path/to/brand.pdf",
-            localization_guidelines_file="path/to/locale.yaml"
+            localization_guidelines_file="path/to/locale.yaml",
         )
 
         assert brief.brand_guidelines_file == "path/to/brand.pdf"
@@ -359,12 +325,10 @@ class TestCampaignBrief:
             campaign_id="TEST",
             campaign_name="Test",
             brand_name="Brand",
-            campaign_message=CampaignMessage(
-                headline="H", subheadline="S", cta="C"
-            ),
+            campaign_message=CampaignMessage(headline="H", subheadline="S", cta="C"),
             products=[Product(**example_product)],
             enable_localization=True,
-            target_locales=["en-US", "es-MX", "fr-CA", "pt-BR", "de-DE"]
+            target_locales=["en-US", "es-MX", "fr-CA", "pt-BR", "de-DE"],
         )
 
         assert len(brief.target_locales) == 5
@@ -383,7 +347,7 @@ class TestGeneratedAsset:
             locale="en-US",
             aspect_ratio="1:1",
             file_path="/output/asset.png",
-            generation_method="firefly"
+            generation_method="firefly",
         )
 
         assert asset.product_id == "PROD-001"
@@ -401,11 +365,7 @@ class TestGeneratedAsset:
             aspect_ratio="16:9",
             file_path="/path/to/asset.jpg",
             generation_method="openai",
-            metadata={
-                "prompt": "test prompt",
-                "seed": 12345,
-                "backend": "dall-e-3"
-            }
+            metadata={"prompt": "test prompt", "seed": 12345, "backend": "dall-e-3"},
         )
 
         assert "prompt" in asset.metadata
@@ -417,11 +377,7 @@ class TestGeneratedAsset:
         from src.models import GeneratedAsset
 
         asset = GeneratedAsset(
-            product_id="P1",
-            locale="en-US",
-            aspect_ratio="1:1",
-            file_path="/path",
-            generation_method="firefly"
+            product_id="P1", locale="en-US", aspect_ratio="1:1", file_path="/path", generation_method="firefly"
         )
 
         assert asset.timestamp is not None
@@ -437,19 +393,11 @@ class TestCampaignOutput:
 
         assets = [
             GeneratedAsset(
-                product_id="P1",
-                locale="en-US",
-                aspect_ratio="1:1",
-                file_path="/path1.png",
-                generation_method="firefly"
+                product_id="P1", locale="en-US", aspect_ratio="1:1", file_path="/path1.png", generation_method="firefly"
             ),
             GeneratedAsset(
-                product_id="P1",
-                locale="es-MX",
-                aspect_ratio="1:1",
-                file_path="/path2.png",
-                generation_method="firefly"
-            )
+                product_id="P1", locale="es-MX", aspect_ratio="1:1", file_path="/path2.png", generation_method="firefly"
+            ),
         ]
 
         output = CampaignOutput(
@@ -460,7 +408,7 @@ class TestCampaignOutput:
             locales_processed=["en-US", "es-MX"],
             products_processed=["P1"],
             processing_time_seconds=120.5,
-            success_rate=1.0
+            success_rate=1.0,
         )
 
         assert output.total_assets == 2
@@ -480,10 +428,7 @@ class TestCampaignOutput:
             products_processed=[],
             processing_time_seconds=10.0,
             success_rate=0.0,
-            errors=[
-                "Error processing product P1",
-                "Error generating locale es-MX"
-            ]
+            errors=["Error processing product P1", "Error generating locale es-MX"],
         )
 
         assert len(output.errors) == 2
@@ -493,10 +438,7 @@ class TestCampaignOutput:
         """Test campaign output default values."""
         from src.models import CampaignOutput
 
-        output = CampaignOutput(
-            campaign_id="CAMP-003",
-            campaign_name="Test Campaign"
-        )
+        output = CampaignOutput(campaign_id="CAMP-003", campaign_name="Test Campaign")
 
         assert output.total_assets == 0
         assert output.generated_assets == []

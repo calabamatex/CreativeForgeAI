@@ -23,9 +23,7 @@ logger = structlog.get_logger(__name__)
 MAX_PROMPT_LENGTH: int = 4_000
 
 #: Allowed file extensions for user uploads.
-ALLOWED_UPLOAD_EXTENSIONS: frozenset[str] = frozenset(
-    {".pdf", ".docx", ".txt", ".json", ".yaml", ".yml"}
-)
+ALLOWED_UPLOAD_EXTENSIONS: frozenset[str] = frozenset({".pdf", ".docx", ".txt", ".json", ".yaml", ".yml"})
 
 #: Maximum upload file size in bytes (10 MB).
 MAX_UPLOAD_SIZE_BYTES: int = 10 * 1024 * 1024  # 10 MB
@@ -33,14 +31,10 @@ MAX_UPLOAD_SIZE_BYTES: int = 10 * 1024 * 1024  # 10 MB
 #: Regex that matches characters considered *control characters* for our
 #: purposes.  We strip C0/C1 controls except common whitespace (tab, newline,
 #: carriage return).
-_CONTROL_CHAR_RE = re.compile(
-    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"
-)
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 #: UUID v4 pattern for path parameter validation.
-UUID_RE = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-)
+UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +101,7 @@ def validate_upload_extension(filename: str) -> str:
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_UPLOAD_EXTENSIONS:
         raise ValueError(
-            f"File type '{ext}' is not allowed. "
-            f"Accepted types: {', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}"
+            f"File type '{ext}' is not allowed. Accepted types: {', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}"
         )
     return ext
 
@@ -125,9 +118,7 @@ def validate_upload_size(size_bytes: int) -> None:
     if size_bytes > MAX_UPLOAD_SIZE_BYTES:
         max_mb = MAX_UPLOAD_SIZE_BYTES / (1024 * 1024)
         actual_mb = size_bytes / (1024 * 1024)
-        raise ValueError(
-            f"File size {actual_mb:.1f} MB exceeds maximum of {max_mb:.0f} MB"
-        )
+        raise ValueError(f"File size {actual_mb:.1f} MB exceeds maximum of {max_mb:.0f} MB")
 
 
 # ---------------------------------------------------------------------------

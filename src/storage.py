@@ -19,17 +19,19 @@ asset is written EXACTLY ONCE through the pluggable
 ``GeneratedAsset.storage_key`` and what ``/assets/{id}/download`` resolves. There
 is no disk-write -> reread round trip and no second asset-bytes writer.
 """
+
 import json
 import re
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
-from PIL import Image
-from datetime import datetime, timezone
-from typing import Dict, List, Optional
+
 import structlog
-from src.models import CampaignOutput, CampaignBrief
+from PIL import Image
+
 from src.config import get_config
 from src.exceptions import StorageError
+from src.models import CampaignOutput
 
 logger = structlog.get_logger(__name__)
 
@@ -63,12 +65,7 @@ class StorageManager:
         return campaign_dir
 
     def get_asset_path(
-        self,
-        campaign_id: str,
-        locale: str,
-        product_id: str,
-        aspect_ratio: str,
-        format: str = "png"
+        self, campaign_id: str, locale: str, product_id: str, aspect_ratio: str, format: str = "png"
     ) -> Path:
         """Generate path for campaign asset."""
         # Validate all path components
@@ -81,26 +78,25 @@ class StorageManager:
 
         # Structure: product_id/campaign_id/locale/ratio/filename
         path = (
-            self.output_dir / product_id / campaign_id / locale /
-            ratio_dir / f"{product_id}_{ratio_dir}_{locale}.{format}"
+            self.output_dir
+            / product_id
+            / campaign_id
+            / locale
+            / ratio_dir
+            / f"{product_id}_{ratio_dir}_{locale}.{format}"
         )
 
         # Create directories
         path.parent.mkdir(parents=True, exist_ok=True)
 
         return path
-    
+
     def save_image(self, image: Image.Image, path: Path) -> None:
         """Save image to file."""
         path.parent.mkdir(parents=True, exist_ok=True)
         image.save(path, optimize=True, quality=95)
-    
-    def save_report(
-        self,
-        campaign_output: CampaignOutput,
-        campaign_id: str,
-        product_id: str
-    ) -> Path:
+
+    def save_report(self, campaign_output: CampaignOutput, campaign_id: str, product_id: str) -> Path:
         """
         Save per-product campaign report JSON with enhanced metrics.
 
@@ -121,19 +117,18 @@ class StorageManager:
         report_path = reports_dir / filename
 
         # Filter assets for this product only
-        product_assets = [
-            asset for asset in campaign_output.generated_assets
-            if asset.product_id == product_id
-        ]
+        product_assets = [asset for asset in campaign_output.generated_assets if asset.product_id == product_id]
 
         # Create product-specific output
-        product_output = campaign_output.model_copy(update={
-            "generated_assets": product_assets,
-            "total_assets": len(product_assets),
-            "products_processed": [product_id]
-        })
+        product_output = campaign_output.model_copy(
+            update={
+                "generated_assets": product_assets,
+                "total_assets": len(product_assets),
+                "products_processed": [product_id],
+            }
+        )
 
-        with open(report_path, 'w') as f:
+        with open(report_path, "w") as f:
             json.dump(product_output.model_dump(), f, indent=2, default=str)
 
         return report_path
@@ -154,7 +149,7 @@ class StorageManager:
             raise FileNotFoundError(f"Campaign brief not found: {brief_path}")
 
         # Generate UTC timestamp for backup filename
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
         backup_name = f"{brief_file.stem}_{timestamp}{brief_file.suffix}"
         backup_path = brief_file.parent / backup_name
 
@@ -164,10 +159,7 @@ class StorageManager:
         return backup_path
 
     def update_campaign_brief(
-        self,
-        brief_path: str,
-        campaign_output: CampaignOutput,
-        hero_images: Optional[Dict[str, str]] = None
+        self, brief_path: str, campaign_output: CampaignOutput, hero_images: dict[str, str] | None = None
     ) -> None:
         """
         Update original campaign brief with generated asset paths.
@@ -180,11 +172,11 @@ class StorageManager:
         brief_file = Path(brief_path)
 
         # Load current brief
-        with open(brief_file, 'r') as f:
+        with open(brief_file) as f:
             brief_data = json.load(f)
 
         # Group generated assets by product_id and locale
-        assets_by_product: Dict[str, Dict[str, Dict[str, str]]] = {}
+        assets_by_product: dict[str, dict[str, dict[str, str]]] = {}
 
         for asset in campaign_output.generated_assets:
             product_id = asset.product_id
@@ -201,17 +193,17 @@ class StorageManager:
             assets_by_product[product_id][locale][ratio] = asset.file_path
 
         # Update products with generated assets
-        for product in brief_data.get('products', []):
-            product_id = product['product_id']
+        for product in brief_data.get("products", []):
+            product_id = product["product_id"]
 
             if product_id in assets_by_product or (hero_images and product_id in hero_images):
                 # Initialize or update existing_assets
-                if 'existing_assets' not in product or product['existing_assets'] is None:
-                    product['existing_assets'] = {}
+                if "existing_assets" not in product or product["existing_assets"] is None:
+                    product["existing_assets"] = {}
 
                 # Add hero image if provided
                 if hero_images and product_id in hero_images:
-                    product['existing_assets']['hero'] = hero_images[product_id]
+                    product["existing_assets"]["hero"] = hero_images[product_id]
 
                 # Add generated assets organized by locale and aspect ratio
                 if product_id in assets_by_product:
@@ -219,10 +211,10 @@ class StorageManager:
                         for ratio, file_path in ratios.items():
                             # Use descriptive key format: {locale}_{ratio}
                             asset_key = f"{locale}_{ratio}"
-                            product['existing_assets'][asset_key] = file_path
+                            product["existing_assets"][asset_key] = file_path
 
         # Write updated brief back to original file
-        with open(brief_file, 'w') as f:
+        with open(brief_file, "w") as f:
             json.dump(brief_data, f, indent=2)
 
         logger.info("storage.brief_updated", path=str(brief_file))

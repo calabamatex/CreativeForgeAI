@@ -1,16 +1,14 @@
 """Tests for security utilities."""
-import pytest
-from pathlib import Path
 
+import pytest
 from src.security import (
-    sanitize_prompt,
-    validate_upload_extension,
-    validate_upload_size,
-    validate_safe_path,
-    is_valid_uuid,
     MAX_PROMPT_LENGTH,
     MAX_UPLOAD_SIZE_BYTES,
-    ALLOWED_UPLOAD_EXTENSIONS,
+    is_valid_uuid,
+    sanitize_prompt,
+    validate_safe_path,
+    validate_upload_extension,
+    validate_upload_size,
 )
 
 
@@ -55,23 +53,29 @@ class TestSanitizePrompt:
 class TestValidateUploadExtension:
     """Test upload extension validation."""
 
-    @pytest.mark.parametrize("filename,expected_ext", [
-        ("doc.pdf", ".pdf"),
-        ("file.docx", ".docx"),
-        ("data.json", ".json"),
-        ("config.yaml", ".yaml"),
-        ("config.yml", ".yml"),
-        ("readme.txt", ".txt"),
-    ])
+    @pytest.mark.parametrize(
+        "filename,expected_ext",
+        [
+            ("doc.pdf", ".pdf"),
+            ("file.docx", ".docx"),
+            ("data.json", ".json"),
+            ("config.yaml", ".yaml"),
+            ("config.yml", ".yml"),
+            ("readme.txt", ".txt"),
+        ],
+    )
     def test_allowed_extensions(self, filename, expected_ext):
         assert validate_upload_extension(filename) == expected_ext
 
-    @pytest.mark.parametrize("filename", [
-        "script.py",
-        "program.exe",
-        "image.png",
-        "style.css",
-    ])
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "script.py",
+            "program.exe",
+            "image.png",
+            "style.css",
+        ],
+    )
     def test_disallowed_extensions(self, filename):
         with pytest.raises(ValueError, match="not allowed"):
             validate_upload_extension(filename)

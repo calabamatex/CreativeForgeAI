@@ -1,15 +1,13 @@
 """Tests for image effects: logo overlay and post-processing."""
+
 import pytest
 from PIL import Image
-from unittest.mock import patch, MagicMock
-from pathlib import Path
-
 from src.image_effects import (
+    _apply_color_correction,
+    _apply_sharpening,
+    _calculate_logo_position,
     apply_logo_overlay,
     apply_post_processing,
-    _calculate_logo_position,
-    _apply_sharpening,
-    _apply_color_correction,
 )
 from src.models import ComprehensiveBrandGuidelines, PostProcessingConfig
 
