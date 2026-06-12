@@ -1,3 +1,7 @@
+![Creative Forge AI](/docs/Scaling_Global_Marketing_with_AI.png)
+
+
+
 # GenAI Creative Automation Platform
 
 > **AI-powered creative automation platform for generating localized, brand-compliant marketing assets at scale**
