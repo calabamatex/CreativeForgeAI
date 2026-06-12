@@ -1,7 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { campaignApi } from "../api/campaigns";
 
-export function useCampaigns(params?: { status?: string }) {
+export function useCampaigns(params?: {
+  status?: string;
+  backend?: string;
+  page?: number;
+  per_page?: number;
+}) {
   return useQuery({
     queryKey: ["campaigns", params],
     queryFn: () => campaignApi.list(params),

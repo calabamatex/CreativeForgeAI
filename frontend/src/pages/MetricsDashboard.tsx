@@ -60,7 +60,7 @@ export default function MetricsDashboard() {
 
   const campaignsQuery = useQuery({
     queryKey: ["campaigns"],
-    queryFn: () => campaignApi.list({ limit: 100 }),
+    queryFn: () => campaignApi.list({ per_page: 100 }),
   });
 
   const campaigns: Campaign[] = campaignsQuery.data?.data ?? [];

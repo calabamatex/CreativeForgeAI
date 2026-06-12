@@ -17,7 +17,7 @@ type FormData = z.infer<typeof schema>;
 
 export default function Register() {
   const [error, setError] = useState("");
-  const { setAuth } = useAuthStore();
+  const { setUser } = useAuthStore();
   const navigate = useNavigate();
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({ resolver: zodResolver(schema) });
 
@@ -25,9 +25,10 @@ export default function Register() {
     setError("");
     try {
       await authApi.register({ email: data.email, password: data.password, display_name: data.display_name });
-      const res = await authApi.login({ email: data.email, password: data.password });
+      // login sets the httpOnly cookies; /auth/me populates user state.
+      await authApi.login({ email: data.email, password: data.password });
       const me = await authApi.me();
-      setAuth(me.data, res.data.access_token);
+      setUser(me.data);
       navigate("/");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Registration failed");

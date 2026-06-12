@@ -1,19 +1,30 @@
 import { api } from "./client";
-import type { Campaign, Envelope, PaginatedEnvelope } from "./types";
+import type {
+  Campaign,
+  CampaignCreate,
+  Envelope,
+  PaginatedEnvelope,
+} from "./types";
 
 export const campaignApi = {
-  list: (params?: { status?: string; cursor?: string; limit?: number }) => {
+  list: (params?: {
+    status?: string;
+    backend?: string;
+    page?: number;
+    per_page?: number;
+  }) => {
     const query = new URLSearchParams();
     if (params?.status) query.set("status", params.status);
-    if (params?.cursor) query.set("cursor", params.cursor);
-    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.backend) query.set("backend", params.backend);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.per_page) query.set("per_page", String(params.per_page));
     const qs = query.toString();
     return api.get<PaginatedEnvelope<Campaign>>(`/campaigns${qs ? `?${qs}` : ""}`);
   },
 
   get: (id: string) => api.get<Envelope<Campaign>>(`/campaigns/${id}`),
 
-  create: (data: { brief: Record<string, unknown>; brand_guidelines_id?: string; image_backend?: string }) =>
+  create: (data: CampaignCreate) =>
     api.post<Envelope<Campaign>>("/campaigns", data),
 
   update: (id: string, data: Record<string, unknown>) =>

@@ -1,6 +1,19 @@
 // ---------------------------------------------------------------------------
 // Auth Types
+//
+// Token model (P5-T3): COOKIE-BASED. The backend sets the access AND refresh
+// tokens as httpOnly cookies; the browser never reads either. The frontend does
+// NOT store tokens (no localStorage) and does NOT send an Authorization header —
+// it relies on `credentials: "include"` so the cookies ride along.
+//
+// `TokenResponse` below is the login/refresh response BODY shape. The browser
+// ignores the token fields (they exist for non-browser API clients); only the
+// Set-Cookie headers matter for the SPA. The server also returns a
+// `refresh_token` field in the body, but a cookie client never uses it.
 // ---------------------------------------------------------------------------
+
+/** Server enum: UserRole. */
+export type UserRole = "viewer" | "editor" | "admin";
 
 export interface User {
   id: string;
@@ -10,8 +23,13 @@ export interface User {
   created_at: string;
 }
 
+/**
+ * Login/refresh response body. The SPA ignores these token fields (auth is
+ * carried by httpOnly cookies); they are present for non-browser API clients.
+ */
 export interface TokenResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
   expires_in: number;
 }
@@ -25,44 +43,64 @@ export interface LoginRequest {
 // Campaign Types
 // ---------------------------------------------------------------------------
 
-export type CampaignStatus =
-  | "draft"
-  | "queued"
-  | "processing"
-  | "completed"
-  | "failed"
-  | "cancelled";
+/**
+ * Server enum: CampaignStatus. The server only emits these four values; the
+ * `status` field on response models is typed as a plain string on the wire, so
+ * `Campaign`/`CampaignListItem` keep `status: string` for forward-compat.
+ */
+export type CampaignStatus = "draft" | "processing" | "completed" | "failed";
 
+/** Full campaign representation (server: CampaignResponse). */
 export interface Campaign {
   id: string;
   campaign_id: string;
   campaign_name: string;
   brand_name: string;
-  status: CampaignStatus;
-  brief: Record<string, unknown>;
+  status: string;
   image_backend: string;
+  brand_guidelines_id: string | null;
+  brief: Record<string, unknown>;
   target_locales: string[];
   aspect_ratios: string[];
+  created_by: string | null;
   created_at: string;
   updated_at: string;
   asset_count: number;
-  job?: Job;
+  latest_job?: Job | null;
 }
 
+/** Slim campaign representation in list responses (server: CampaignListItem). */
+export interface CampaignListItem {
+  id: string;
+  campaign_id: string;
+  campaign_name: string;
+  brand_name: string;
+  status: string;
+  image_backend: string;
+  asset_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Payload to create a campaign (server: CampaignCreateRequest). */
 export interface CampaignCreate {
-  brief: Record<string, unknown>;
-  brand_guidelines_id?: string;
+  campaign_id: string;
+  campaign_name: string;
+  brand_name: string;
+  brand_guidelines_id?: string | null;
   image_backend?: string;
-}
-
-export interface CampaignUpdate {
-  campaign_name?: string;
-  brand_name?: string;
-  status?: CampaignStatus;
   brief?: Record<string, unknown>;
-  image_backend?: string;
   target_locales?: string[];
   aspect_ratios?: string[];
+}
+
+/** Partial-update payload (server: CampaignUpdateRequest, draft only). */
+export interface CampaignUpdate {
+  campaign_name?: string | null;
+  brief?: Record<string, unknown> | null;
+  target_locales?: string[] | null;
+  aspect_ratios?: string[] | null;
+  image_backend?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,30 +134,38 @@ export type JobStatus =
   | "failed"
   | "cancelled";
 
+/** Async generation job (server: JobResponse). `status` is a plain string on
+ * the wire, backed by the JobStatus enum. */
 export interface Job {
   id: string;
   campaign_id: string;
-  status: JobStatus;
+  status: string;
   progress_percent: number;
   current_stage: string | null;
+  result: Record<string, unknown> | null;
+  error_message: string | null;
   started_at: string | null;
   completed_at: string | null;
-  error_message: string | null;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------
 // Brand Guidelines Types
 // ---------------------------------------------------------------------------
 
+/** Server: BrandResponse. */
 export interface BrandGuideline {
   id: string;
   name: string;
-  primary_colors: string[];
-  secondary_colors: string[];
-  primary_font: string;
-  secondary_font: string | null;
-  brand_voice: string | null;
-  photography_style: string | null;
+  source_file_path?: string | null;
+  primary_colors?: string[] | null;
+  secondary_colors?: string[] | null;
+  primary_font?: string | null;
+  secondary_font?: string | null;
+  brand_voice?: string | null;
+  photography_style?: string | null;
+  raw_extracted_data?: Record<string, unknown> | null;
+  created_by?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -141,6 +187,11 @@ export interface BrandGuidelineCreate {
 // Compliance Types
 // ---------------------------------------------------------------------------
 
+/**
+ * @deprecated Server returns violations as free-form objects (see
+ * ComplianceReportResponse.violations). Kept for any callers referencing the
+ * old structured shape.
+ */
 export interface ComplianceViolation {
   severity: "error" | "warning" | "info";
   rule: string;
@@ -148,11 +199,12 @@ export interface ComplianceViolation {
   field?: string;
 }
 
+/** Server: ComplianceReportResponse. */
 export interface ComplianceReport {
   id: string;
   campaign_id: string;
-  is_compliant: boolean;
-  violations: ComplianceViolation[];
+  is_compliant: boolean | null;
+  violations: Record<string, unknown>[];
   summary: Record<string, unknown>;
   checked_at: string;
 }
@@ -246,11 +298,12 @@ export interface Meta {
   timestamp: string;
 }
 
+/** Server: PaginationMeta — page-based, not cursor-based. */
 export interface PaginationMeta extends Meta {
+  page: number;
+  per_page: number;
   total: number;
-  limit: number;
-  cursor: string | null;
-  has_more: boolean;
+  total_pages: number;
 }
 
 export interface Envelope<T> {

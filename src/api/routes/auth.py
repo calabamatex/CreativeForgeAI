@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -22,6 +23,7 @@ from src.api.dependencies import (
     token_remaining_seconds,
     verify_password,
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    REFRESH_TOKEN_EXPIRE_DAYS,
 )
 from src.cache import CacheUnavailable, get_cache
 from src.api.errors import (
@@ -41,6 +43,80 @@ from src.api.schemas import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+# ---------------------------------------------------------------------------
+# Auth cookies
+# ---------------------------------------------------------------------------
+#
+# Token model (P5-T3): the browser never reads either token. Both the access
+# token AND the refresh token are issued as httpOnly cookies so JavaScript
+# (hence XSS) cannot exfiltrate them. The frontend authenticates purely by the
+# cookies riding along on same-origin ``fetch(..., {credentials:"include"})``.
+#
+# CSRF posture: cookies are ``SameSite=Lax``. Lax keeps the cookie OFF
+# cross-site sub-resource requests (the classic CSRF vector: a hidden
+# ``fetch``/``<img>``/auto-submitted form from an attacker page), so a forged
+# background POST from evil.com carries no credentials and is rejected as 401.
+# Residual risk: Lax (unlike Strict) DOES send the cookie on a *top-level*
+# cross-site navigation that is a GET (e.g. a user clicking a link to our site).
+# Our state-changing endpoints are POST/PATCH/DELETE only and are never reached
+# by a top-level GET navigation, so the practical CSRF surface here is empty.
+# Combined with the credentialed CORS allowlist (no ``*`` origin — see
+# ``main.py``), which blocks cross-origin JS from reading any response, this is
+# an acceptable CSRF defense for a same-origin SPA. (A double-submit CSRF token
+# would be the next hardening step if cross-subdomain hosting were introduced.)
+
+_REFRESH_COOKIE_MAX_AGE = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+_REFRESH_COOKIE_PATH = "/api/v1/auth/refresh"
+
+# ``Secure`` cookies are only returned by browsers over HTTPS. In production this
+# MUST be true; for local HTTP dev/tests it has to be false or the cookie never
+# rides back. Defaults to true (secure-by-default); set COOKIE_SECURE=false for
+# plain-HTTP local runs.
+_COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() == "true"
+
+
+def _set_auth_cookies(response: Response, access: str, refresh: str) -> None:
+    """Set the access + refresh tokens as httpOnly, SameSite=Lax cookies."""
+    response.set_cookie(
+        key="access_token",
+        value=access,
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    # The refresh cookie is scoped to the refresh endpoint only, so it is not
+    # sent on every API call (smaller attack surface, less header bloat).
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh,
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite="lax",
+        max_age=_REFRESH_COOKIE_MAX_AGE,
+        path=_REFRESH_COOKIE_PATH,
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    """Delete both auth cookies (used on logout)."""
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite="lax",
+        path=_REFRESH_COOKIE_PATH,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -122,16 +198,10 @@ async def login(
     access = create_access_token(str(user.id), user.role)
     refresh = create_refresh_token(str(user.id))
 
-    # Set httpOnly cookie for browser usage
-    response.set_cookie(
-        key="access_token",
-        value=access,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        path="/",
-    )
+    # Set httpOnly access + refresh cookies for browser usage. The body still
+    # echoes the tokens for non-browser API clients (CLI/tests), but a cookie
+    # browser never reads them.
+    _set_auth_cookies(response, access, refresh)
 
     logger.info("auth.login", user_id=str(user.id))
 
@@ -156,14 +226,26 @@ async def login(
     dependencies=[Depends(check_rate_limit)],
 )
 async def refresh_token(
-    body: RefreshRequest,
     response: Response,
+    body: RefreshRequest | None = None,
+    refresh_cookie: str | None = Cookie(None, alias="refresh_token"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Exchange a valid refresh token for a new access + refresh pair."""
+    """Exchange a valid refresh token for a new access + refresh pair.
+
+    The refresh token is read from the request body (non-browser API clients)
+    when present, else from the ``refresh_token`` httpOnly cookie (browser
+    clients, which cannot read the cookie to put it in a body). Body wins when
+    both are present: it is the explicit token the API client chose to rotate,
+    independent of whatever rotated cookie the jar happens to be carrying.
+    """
     from src.db.models import User  # noqa: E402
 
-    payload = decode_token(body.refresh_token)
+    presented = (body.refresh_token if body else None) or refresh_cookie
+    if not presented:
+        raise AuthenticationError("Missing refresh token")
+
+    payload = decode_token(presented)
 
     if payload.get("type") != "refresh":
         raise AuthenticationError("Token is not a refresh token")
@@ -212,15 +294,8 @@ async def refresh_token(
     access = create_access_token(str(user.id), user.role)
     refresh = create_refresh_token(str(user.id))
 
-    response.set_cookie(
-        key="access_token",
-        value=access,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        path="/",
-    )
+    # Rotation: issue a fresh refresh cookie (the old jti was just denylisted).
+    _set_auth_cookies(response, access, refresh)
 
     logger.info("auth.refresh", user_id=str(user.id))
 
@@ -252,13 +327,7 @@ async def logout(
     until it naturally expires. The denylist TTL equals the token's remaining
     life so the entry self-expires (no unbounded growth).
     """
-    response.delete_cookie(
-        key="access_token",
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        path="/",
-    )
+    _clear_auth_cookies(response)
 
     # Resolve the presented token (header preferred, else cookie) and revoke it.
     token: str | None = None

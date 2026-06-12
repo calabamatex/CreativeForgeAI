@@ -14,8 +14,10 @@ class ApiError extends Error {
 /**
  * Core fetch wrapper.
  *
- * - Injects the JWT token from localStorage when available.
- * - On 401 responses clears the stored token and redirects to /login.
+ * Auth model (P5-T3): the access token lives in an httpOnly cookie set by the
+ * backend, NOT in localStorage (which is XSS-readable). We never inject an
+ * Authorization header; instead `credentials: "include"` makes the browser
+ * attach the cookie on same-origin requests. On 401 we redirect to /login.
  * - Returns parsed JSON for all non-204 responses.
  */
 async function request<T>(
@@ -28,15 +30,9 @@ async function request<T>(
     ...((options.headers as Record<string, string>) || {}),
   };
 
-  const token = localStorage.getItem("access_token");
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
   const res = await fetch(url, { ...options, headers, credentials: "include" });
 
   if (res.status === 401) {
-    localStorage.removeItem("access_token");
     // Only redirect when running in a browser context (not during tests).
     if (typeof window !== "undefined" && window.location.pathname !== "/login") {
       window.location.href = "/login";
@@ -67,15 +63,9 @@ async function requestRaw(
     ...((options.headers as Record<string, string>) || {}),
   };
 
-  const token = localStorage.getItem("access_token");
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
   const res = await fetch(url, { ...options, headers, credentials: "include" });
 
   if (res.status === 401) {
-    localStorage.removeItem("access_token");
     if (typeof window !== "undefined" && window.location.pathname !== "/login") {
       window.location.href = "/login";
     }
