@@ -159,7 +159,9 @@ def validate_safe_path(user_path: str, base_dir: str | Path) -> Path:
     base = Path(base_dir).resolve()
     resolved = (base / user_path).resolve()
 
-    if not str(resolved).startswith(str(base)):
+    # Real containment check (not string-prefix): rejects sibling-prefix
+    # bypasses such as base ``/data/output`` vs ``/data/output-evil``.
+    if resolved != base and not resolved.is_relative_to(base):
         raise ValueError("Path escapes the allowed directory")
 
     return resolved

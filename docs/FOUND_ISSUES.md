@@ -29,3 +29,20 @@ but authenticates via the standard boto3 credential chain, so it actually needs
 Worked around in `.env.example` by setting both the `S3_*` (documentation) and
 `AWS_*` (actually used) variables. A future cleanup could make the backend read
 the `S3_*` names explicitly. `src/storage_s3.py:35-57`.
+
+## P1 (discovered during Phase 1)
+
+### `test_cli.py::test_validate_config_command` fails in the FULL suite, passes in isolation — PRE-EXISTING, deferred to P6
+Confirmed pre-existing (fails identically on `phase-0-baseline`, before any Phase 1
+change). The test passes when run alone but exits 1 in a full `pytest` run — a
+test-isolation/ordering bug: `validate-config` reads a module-level `Config`
+singleton (`src/config.py`) and another test pollutes `os.environ` / the singleton,
+so the image-backend check fails out of order. Not a Phase 1 regression. Belongs to
+the P6 test-taxonomy/conftest work (isolate config state per test).
+`tests/test_cli.py::TestCLI::test_validate_config_command`.
+
+### Residual `Adobe` branding + unsubstantiated "patent-pending" claim in README — NOTED
+After the P1-T4 honesty pass, `README.md` still carries legacy `Adobe` /
+`adobe-genai-project` branding, a "patent-pending" claim near the footer, and a
+back-to-top anchor pointing at an old `#adobe-genai...` slug. Out of scope for the
+P1-T4 feature-claim reconciliation; flag for a later branding/legal pass.

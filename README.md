@@ -22,11 +22,11 @@ GenAI Creative Automation Platform is an enterprise-grade system that automates 
 - 🌍 **AI-Powered Localization** - Claude 3.5 Sonnet for culturally-adapted messaging
 - ⚖️ **Legal Compliance Checking** - Pre-generation validation (FTC, FDA, SEC, FINRA)
 - 🎭 **Brand Guidelines Enforcement** - Automated brand consistency across all assets
-- 📐 **Multi-Format Asset Generation** - 1:1, 16:9, 9:16 aspect ratios
+- 📐 **Multi-Format Asset Output** - 1:1, 16:9, 9:16 aspect ratios (currently one square hero generated, then cropped to each ratio; native per-ratio generation is *in progress*)
 - 🔄 **Asset Reuse System** - Intelligent caching to reduce API costs
 - 🎨 **Advanced Text Customization** - Colors, shadows, backgrounds with brand control
 - 🖼️ **Logo Placement** - Automated logo overlay with 4-corner positioning
-- 📊 **Enhanced Campaign Analytics** - Technical metrics, business ROI, cost savings tracking
+- 📊 **Campaign Analytics** - Technical metrics measured per run (API timing, cache efficiency, memory)
 
 ---
 
@@ -76,15 +76,15 @@ GenAI Creative Automation Platform is an enterprise-grade system that automates 
 - ✅ **Design system compliance** - Consistent brand experience
 
 ### Asset Management
-- ✅ **Multi-format generation** - Square (1:1), Landscape (16:9), Portrait (9:16)
+- 🔶 **Multi-format output** *(in progress)* - Square (1:1), Landscape (16:9), Portrait (9:16). Today a single square hero is generated and cropped to the other ratios; native per-ratio generation is being delivered in a later phase.
 - ✅ **Multiple output formats** - PNG, JPEG, WebP
 - ✅ **Asset reuse** - Intelligent caching system
 - ✅ **Organized storage** - Campaign/Locale/Product/Format hierarchy
 - ✅ **Brief updates** - Automatic tracking of generated assets
 
 ### Campaign Analytics & Reporting
-- ✅ **Enhanced technical metrics** - API response times, cache efficiency, memory usage
-- ✅ **Business ROI metrics** - Time saved, cost savings, ROI multiplier
+- ✅ **Technical metrics** - API response times, cache efficiency, memory usage (measured per run)
+- 🔶 **Cost / API-call accounting** *(in progress)* - The API metrics endpoints currently return placeholder zeros for `api_calls`, `cache_hit_rate`, and `cost_estimate_usd`; real wiring is being delivered in a later phase. See [Roadmap](#-roadmap).
 - ✅ **Performance tracking** - Processing times, localization efficiency, asset throughput
 - ✅ **Compliance monitoring** - Pass rates, violation tracking
 - ✅ **Historical reports** - Timestamped reports in `output/campaign_reports/`
@@ -399,22 +399,26 @@ Reuse existing hero images, generate only new formats:
 ```
 
 **Benefits:**
-- 70% reduction in API calls
-- 90% faster processing
-- Significant cost savings
+- Fewer image-generation API calls (a cached hero is reused instead of regenerated)
+- Faster processing for reused formats (no generation call)
+- Lower spend follows directly from the avoided API calls
+
+  (The exact reduction depends on your cache-hit rate; the per-run figures are
+  reported in the technical metrics, not asserted as fixed percentages here.)
 
 ---
 
 ## 📊 Enhanced Campaign Reporting
 
-**New in v1.3.0:** Comprehensive technical and business metrics for every campaign!
+**New in v1.3.0:** Technical metrics measured for every campaign run. (A former "business metrics" block was removed — see the note below.)
 
 ### Overview
 
 Every campaign generates a detailed report in `output/campaign_reports/` with:
-- **Technical Metrics** - API performance, cache efficiency, memory usage
-- **Business Metrics** - ROI, cost savings, time saved, efficiency scores
+- **Technical Metrics** - API performance, cache efficiency, memory usage (measured per run)
 - **Historical Tracking** - Timestamped reports for audit trails
+
+> **Note:** Earlier versions of this README advertised a `business_metrics` block (ROI multiplier, dollar savings, time-saved-vs-manual). Those values were computed entirely from hard-coded constants and were tautologies, not measurements, so the code and the report no longer emit them. See [Roadmap → Honest business metrics](#-roadmap) for what real inputs would be required, and `docs/ENHANCED_REPORTING.md` for the full explanation.
 
 ### Report Location & Format
 
@@ -462,37 +466,16 @@ Every campaign generates a detailed report in `output/campaign_reports/` with:
 - System environment details
 - Full error stack traces for debugging
 
-### Business Metrics (13 fields)
+### Business Metrics — removed (not currently computed)
 
-```json
-{
-  "business_metrics": {
-    "time_saved_vs_manual_hours": 95.2,
-    "time_saved_percentage": 99.1,
-    "cost_savings_percentage": 80.0,
-    "manual_baseline_cost": 2700.0,
-    "estimated_manual_cost": 2250.0,
-    "estimated_savings": 1800.0,
-    "roi_multiplier": 9.0,
-    "labor_hours_saved": 95.2,
-    "compliance_pass_rate": 100.0,
-    "asset_reuse_efficiency": 0.0,
-    "avg_time_per_locale_seconds": 9.1,
-    "avg_time_per_asset_seconds": 1.5,
-    "localization_efficiency_score": 39.7
-  }
-}
-```
-
-**What you can analyze:**
-- Time savings vs manual production (hours & percentage)
-- Cost savings and dollar value estimates
-- Return on investment (ROI) multipliers
-- Labor hours saved
-- Compliance pass rates
-- Asset reuse efficiency through caching
-- Processing efficiency (assets per hour)
-- Average time per locale and per asset
+A `business_metrics` block (ROI multiplier, cost-savings percentage, dollar
+savings, time-saved-vs-manual hours) used to appear here. **It was removed
+because every field was derived from hard-coded constants** (a fixed 96-hour
+manual baseline and a fixed $2,700 manual cost), which made the reported "ROI
+multiplier" algebraically fixed by construction regardless of the actual
+workload. A number determined entirely by hard-coded inputs is a restatement of
+the input, not a measurement, so the report no longer emits it. See
+[Roadmap → Honest business metrics](#-roadmap).
 
 ### Console Output
 
@@ -513,23 +496,19 @@ When you run a campaign, you'll see comprehensive metrics:
    Localization: 1150ms total
    Compliance Check: 235ms
    Peak Memory: 342.5 MB
-
-💰 Business Metrics:
-   Time Saved: 95.2 hours (99.1% vs manual)
-   Cost Savings: 80.0% (Est. $1,800.00 saved)
-   ROI Multiplier: 9.0x
-   Asset Reuse Efficiency: 0.0%
-   Localization Efficiency: 39.7 assets/hour
-   Compliance Pass Rate: 100.0%
 ```
+
+> The console output is limited to the **technical metrics measured during the
+> run**. The pipeline no longer prints "Business Metrics" / ROI / dollar-savings
+> lines — see [Roadmap → Honest business metrics](#-roadmap).
 
 ### Use Cases
 
 **For Product Managers:**
-- Track ROI and cost savings across campaigns
-- Monitor asset production efficiency
-- Demonstrate business value to stakeholders
+- Monitor asset production efficiency (processing time, throughput)
+- Track compliance pass rates across campaigns
 - Identify optimization opportunities
+- *(planned)* Cost/ROI tracking once real cost inputs are wired in — see [Roadmap](#-roadmap)
 
 **For Engineers:**
 - Monitor API performance and response times
@@ -538,11 +517,14 @@ When you run a campaign, you'll see comprehensive metrics:
 - Profile memory usage and system resources
 - Identify performance bottlenecks
 
-**For Finance Teams:**
-- Calculate cost savings vs manual production
-- Track labor hours saved
+**For Finance Teams:** *(planned — not yet computed)*
+- Cost-per-asset and cost savings vs. a manual baseline
 - ROI analysis for AI automation investment
 - Budget planning for campaign production
+
+  These require real per-call API billing data, a measured manual-production
+  baseline, and a cost-of-time input — none of which are wired in today. See
+  [Roadmap → Honest business metrics](#-roadmap).
 
 **For Compliance Officers:**
 - Monitor compliance pass rates
@@ -614,8 +596,29 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - ✅ **AI Localization** - 40+ languages with Claude 3.5 Sonnet
 - ✅ **Phase 1 Innovation** - Per-element text customization (patent-pending)
 - ✅ **Brand Guidelines** - Comprehensive enforcement system
-- ✅ **Asset Optimization** - Hero image reuse, cost savings
-- ✅ **Enhanced Campaign Reporting** - Technical + business metrics, ROI tracking, historical reports
+- ✅ **Asset Optimization** - Hero image reuse via caching (fewer API calls)
+- ✅ **Campaign Reporting** - Technical metrics (measured) + timestamped historical reports
+
+### In Progress (delivered later in the correctness/feature plan)
+
+- 🔶 **Native multi-format generation** - Generate each aspect ratio natively. Today a single square hero is generated and cropped to 1:1 / 16:9 / 9:16.
+- 🔶 **Real cost & API-call metrics** - The API metrics endpoints currently return placeholder zeros for `api_calls`, `cache_hit_rate`, and `cost_estimate_usd`; real instrumentation is being wired in.
+- 🔶 **Live WebSocket progress** - Real-time job progress over WebSocket. The current implementation emits a fixed heartbeat, not true per-step progress.
+
+#### Honest business metrics *(planned — not yet computed)*
+
+A `business_metrics` block (ROI multiplier, dollar savings, time-saved-vs-manual)
+was **removed** because its values were tautologies derived from hard-coded
+constants, not measurements. To compute these honestly the pipeline would need
+three real inputs that are not wired in today:
+
+1. **Real per-call API cost** — from each provider's billing API, or a configurable per-backend rate card.
+2. **A measured manual-production baseline** — observed time and cost from a real comparable manual workflow at the deploying organization.
+3. **A defined cost-of-time input** — a fully-loaded hourly rate for the relevant role, supplied per deployment.
+
+With those, the pipeline could honestly report cost-per-asset, time-per-asset,
+and a delta vs. the organization's own baseline. Until then, no ROI or
+dollar-savings figure is emitted. See `docs/ENHANCED_REPORTING.md`.
 
 ### Planned Features (v1.4+)
 

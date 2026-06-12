@@ -40,6 +40,43 @@ def _db_returning_sequence(mock_db, *results):
     mock_db.execute = AsyncMock(side_effect=fake_results)
 
 
+# Legal guidelines serialized exactly as stored in ``Campaign.legal_guidelines``
+# (a JSONB dump of ``LegalComplianceGuidelines``). "guarantee" is a prohibited
+# word that the real checker must flag as an error.
+LEGAL_GUIDELINES = {
+    "source_file": "examples/guidelines/legal_compliance_general.yaml",
+    "prohibited_words": ["guarantee"],
+    "prohibited_phrases": [],
+    "prohibited_claims": [],
+    "industry_regulations": ["FTC", "FDA"],
+}
+
+
+def _brief_with_message(headline: str, subheadline: str = "Quality you can trust", cta: str = "Shop Now") -> dict:
+    return {
+        "campaign_message": {
+            "locale": "en-US",
+            "headline": headline,
+            "subheadline": subheadline,
+            "cta": cta,
+        },
+        "target_locales": ["en-US"],
+        "products": [],
+    }
+
+
+def _make_checkable_campaign(
+    *,
+    headline: str,
+    legal_guidelines: dict | None = LEGAL_GUIDELINES,
+):
+    """Campaign mock with a real brief message and stored legal guidelines."""
+    c = _make_campaign(brief=_brief_with_message(headline))
+    c.legal_guidelines = legal_guidelines
+    c.target_locales = ["en-US"]
+    return c
+
+
 class TestGetComplianceReport:
     """GET /api/v1/campaigns/{id}/compliance"""
 
@@ -107,6 +144,84 @@ class TestRunComplianceCheck:
 
         resp = await ac.post(f"/api/v1/campaigns/{uuid.uuid4()}/compliance/check")
         assert resp.status_code == 404
+
+    # ------------------------------------------------------------------
+    # P1-T2 regression tests: the route must run the REAL legal checker
+    # and never mask a violation (or a checker failure) as a pass.
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_run_check_prohibited_word_is_non_compliant(self, authed_client):
+        """A campaign whose content contains a prohibited word must come back
+        NON-compliant, and a ComplianceReport with is_compliant False must be
+        persisted (asserted via the mocked session's ``add``)."""
+        ac, mock_db = authed_client
+        # "guarantee" is in LEGAL_GUIDELINES.prohibited_words
+        campaign = _make_checkable_campaign(headline="We guarantee results")
+
+        _db_returning_sequence(mock_db, campaign)
+
+        resp = await ac.post(f"/api/v1/campaigns/{CAMPAIGN_ID}/compliance/check")
+        assert resp.status_code == 201
+        body = resp.json()
+
+        # API response reflects the real verdict.
+        assert body["data"]["is_compliant"] is False
+        violations = body["data"]["violations"]
+        assert any(
+            v["category"] == "prohibited_word" and v["violation"] == "guarantee"
+            for v in violations
+        ), violations
+
+        # A report row was persisted with is_compliant False.
+        assert mock_db.add.called
+        persisted = mock_db.add.call_args.args[0]
+        assert persisted.is_compliant is False
+        assert any(
+            v["violation"] == "guarantee" for v in persisted.violations
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_check_clean_campaign_is_compliant(self, authed_client):
+        """A clean campaign (no prohibited content) must come back compliant."""
+        ac, mock_db = authed_client
+        campaign = _make_checkable_campaign(headline="Discover our new collection")
+
+        _db_returning_sequence(mock_db, campaign)
+
+        resp = await ac.post(f"/api/v1/campaigns/{CAMPAIGN_ID}/compliance/check")
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["data"]["is_compliant"] is True
+
+        assert mock_db.add.called
+        persisted = mock_db.add.call_args.args[0]
+        assert persisted.is_compliant is True
+
+    @pytest.mark.asyncio
+    async def test_run_check_no_guidelines_is_not_checked(self, authed_client):
+        """A campaign with NO legal guidelines must yield an explicit
+        'not checked' state -- is_compliant null, NOT compliant."""
+        ac, mock_db = authed_client
+        campaign = _make_checkable_campaign(
+            headline="We guarantee results", legal_guidelines=None
+        )
+
+        _db_returning_sequence(mock_db, campaign)
+
+        resp = await ac.post(f"/api/v1/campaigns/{CAMPAIGN_ID}/compliance/check")
+        assert resp.status_code == 201
+        body = resp.json()
+
+        # Explicitly NOT compliant, and clearly labeled.
+        assert body["data"]["is_compliant"] is None
+        assert body["data"]["summary"]["status"] == "not_checked"
+        assert "not checked" in body["data"]["summary"]["message"].lower()
+
+        # Persisted report is also "not checked" (is_compliant None).
+        assert mock_db.add.called
+        persisted = mock_db.add.call_args.args[0]
+        assert persisted.is_compliant is None
 
 
 class TestApproveCompliance:

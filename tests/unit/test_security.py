@@ -124,6 +124,33 @@ class TestValidateSafePath:
         result = validate_safe_path("a/b", tmp_path)
         assert str(tmp_path.resolve()) in str(result)
 
+    def test_legitimate_nested_file_passes(self, tmp_path):
+        """A deeply nested file under base must still resolve and pass."""
+        base = tmp_path / "base"
+        (base / "sub").mkdir(parents=True)
+        result = validate_safe_path("sub/file.png", base)
+        assert result == (base / "sub" / "file.png").resolve()
+
+    def test_sibling_prefix_bypass_rejected(self, tmp_path):
+        """A sibling dir sharing a string prefix with base must be rejected.
+
+        ``/base`` and ``/base-evil`` share the string prefix ``/base`` but are
+        distinct directories.  A symlink inside base pointing at the sibling
+        slips past the ``..`` pre-check, so only real path containment (not the
+        old ``startswith`` string check) catches it.  Without the fix, the
+        resolved path ``/tmp/.../base-evil/secret.txt`` string-starts-with
+        ``/tmp/.../base`` and would be wrongly accepted.
+        """
+        base = tmp_path / "base"
+        base.mkdir()
+        evil = tmp_path / "base-evil"
+        evil.mkdir()
+        (evil / "secret.txt").write_text("pwned")
+        # Symlink inside base that resolves to the sibling-prefix dir.
+        (base / "link").symlink_to(evil)
+        with pytest.raises(ValueError, match="escapes the allowed directory"):
+            validate_safe_path("link/secret.txt", base)
+
 
 class TestIsValidUUID:
     """Test UUID validation."""

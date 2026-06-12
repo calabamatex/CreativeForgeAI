@@ -20,7 +20,8 @@ class ClaudeService:
 
         if not self.api_key:
             raise ValueError(
-                "CLAUDE_API_KEY is required. Set it in environment variables or pass to constructor."
+                "ANTHROPIC_API_KEY is required (legacy CLAUDE_API_KEY is also accepted). "
+                "Set it in environment variables or pass to constructor."
             )
 
         self.api_url = config.CLAUDE_API_URL
