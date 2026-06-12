@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import select, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
@@ -79,6 +80,72 @@ class AssetRepository:
             aspect_ratio=aspect_ratio,
         )
         return asset
+
+    async def upsert(
+        self,
+        campaign_id: uuid.UUID,
+        product_id: str,
+        locale: str,
+        aspect_ratio: str,
+        file_path: str,
+        storage_key: str,
+        generation_method: str,
+        file_size_bytes: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        generation_time_ms: float | None = None,
+    ) -> uuid.UUID:
+        """Idempotently insert-or-update an asset for a (campaign, product,
+        locale, aspect_ratio) variant.
+
+        Uses a Postgres ``INSERT ... ON CONFLICT (uq_asset_variant) DO UPDATE``
+        so that reprocessing a campaign (or two overlapping runs racing on the
+        same variant) converges to exactly one row per variant -- never a
+        duplicate and never a unique-constraint crash. The mutable
+        generation-output columns (paths, size, dimensions, method, timing) are
+        refreshed on conflict so the row always reflects the latest run.
+
+        Returns:
+            The primary key (UUID) of the inserted-or-updated row.
+        """
+        values = {
+            "id": uuid.uuid4(),
+            "campaign_id": campaign_id,
+            "product_id": product_id,
+            "locale": locale,
+            "aspect_ratio": aspect_ratio,
+            "file_path": file_path,
+            "storage_key": storage_key,
+            "generation_method": generation_method,
+            "file_size_bytes": file_size_bytes,
+            "width": width,
+            "height": height,
+            "generation_time_ms": generation_time_ms,
+        }
+        stmt = pg_insert(GeneratedAsset).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_asset_variant",
+            set_={
+                "file_path": stmt.excluded.file_path,
+                "storage_key": stmt.excluded.storage_key,
+                "generation_method": stmt.excluded.generation_method,
+                "file_size_bytes": stmt.excluded.file_size_bytes,
+                "width": stmt.excluded.width,
+                "height": stmt.excluded.height,
+                "generation_time_ms": stmt.excluded.generation_time_ms,
+            },
+        ).returning(GeneratedAsset.id)
+        result = await self._session.execute(stmt)
+        asset_id = result.scalar_one()
+        logger.info(
+            "asset.upserted",
+            asset_id=str(asset_id),
+            campaign_id=str(campaign_id),
+            product_id=product_id,
+            locale=locale,
+            aspect_ratio=aspect_ratio,
+        )
+        return asset_id
 
     async def get_by_id(self, asset_id: uuid.UUID) -> GeneratedAsset | None:
         """Return an asset by primary key, or ``None``."""

@@ -84,7 +84,7 @@ GenAI Creative Automation Platform is an enterprise-grade system that automates 
 
 ### Campaign Analytics & Reporting
 - ✅ **Technical metrics** - API response times, cache efficiency, memory usage (measured per run)
-- 🔶 **Cost / API-call accounting** *(in progress)* - The API metrics endpoints currently return placeholder zeros for `api_calls`, `cache_hit_rate`, and `cost_estimate_usd`; real wiring is being delivered in a later phase. See [Roadmap](#-roadmap).
+- ✅ **Cost / API-call accounting** - The worker now persists each run's real `TechnicalMetrics` to `campaign_metrics`, and the API metrics endpoints serve the recorded `api_calls` and `cache_hit_rate` (no more placeholder zeros). `cost_estimate_usd` is computed honestly as `api_calls × unit_price(backend)` from a configurable per-backend price table (documented public list prices for firefly/openai/gemini, ~$0.04/image; override via the `IMAGE_BACKEND_PRICES` env var, e.g. `firefly:0.05,openai:0.04,gemini:0.03`). Backends with no known price report `$0.00` rather than a fabricated figure.
 - ✅ **Performance tracking** - Processing times, localization efficiency, asset throughput
 - ✅ **Compliance monitoring** - Pass rates, violation tracking
 - ✅ **Historical reports** - Timestamped reports in `output/campaign_reports/`

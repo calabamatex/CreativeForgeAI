@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -42,10 +43,13 @@ class User(Base):
         Boolean, nullable=False, server_default="true"
     )
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     # Relationships -- use lazy="raise" for collections to prevent
@@ -95,10 +99,13 @@ class BrandGuideline(Base):
         UUID(as_uuid=True), ForeignKey("users.id")
     )
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     # Relationships
@@ -147,10 +154,13 @@ class Campaign(Base):
         UUID(as_uuid=True), ForeignKey("users.id")
     )
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     # Relationships -- scalar FKs use selectin (cheap, 1 row each);
@@ -210,7 +220,7 @@ class CampaignProduct(Base):
     generation_prompt: Mapped[Optional[str]] = mapped_column(Text)
     hero_image_path: Mapped[Optional[str]] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     # Relationships
@@ -251,7 +261,7 @@ class GeneratedAsset(Base):
     generation_method: Mapped[str] = mapped_column(String(50), nullable=False)
     generation_time_ms: Mapped[Optional[float]] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     # Relationships
@@ -295,13 +305,17 @@ class Job(Base):
         Integer, nullable=False, server_default="0"
     )
     current_stage: Mapped[Optional[str]] = mapped_column(String(50))
-    started_at: Mapped[Optional[datetime]] = mapped_column()
-    completed_at: Mapped[Optional[datetime]] = mapped_column()
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     error_trace: Mapped[Optional[str]] = mapped_column(Text)
     result: Mapped[Optional[dict]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     # Relationships
@@ -340,7 +354,7 @@ class ComplianceReport(Base):
         JSONB, nullable=False, server_default="{}"
     )
     checked_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     # Relationships
@@ -376,7 +390,7 @@ class CampaignMetric(Base):
         JSONB, nullable=False, server_default="{}"
     )
     recorded_at: Mapped[datetime] = mapped_column(
-        nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     # Relationships

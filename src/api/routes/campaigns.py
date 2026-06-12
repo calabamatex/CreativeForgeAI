@@ -13,11 +13,13 @@ import structlog
 
 from src.api.dependencies import (
     check_rate_limit,
+    get_arq_pool,
     get_current_user,
     get_db,
     require_role,
 )
 from src.api.errors import BadRequestError, NotFoundError
+from src.cache import get_cache
 from src.api.schemas import (
     CampaignCreateRequest,
     CampaignListItem,
@@ -34,6 +36,55 @@ from src.api.schemas import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
+
+
+# ---------------------------------------------------------------------------
+# Read-through cache configuration
+# ---------------------------------------------------------------------------
+#
+# Short TTL: list/detail are read-heavy but mutate often; 30s keeps reads cheap
+# while bounding staleness. Explicit invalidation on every mutation means a
+# change is reflected on the very next read regardless of TTL — the TTL is just
+# a backstop for anything we don't (or can't) invalidate precisely.
+CAMPAIGN_CACHE_TTL_SECONDS: int = 30
+
+# Key scheme (all under the cache's global prefix, e.g. "adobegenai:"):
+#   List family:  "campaigns:list:page={p}:per_page={pp}:status={s}:backend={b}"
+#   Detail:       "campaigns:detail:{campaign_id}"
+#
+# Scoping note: GET /campaigns is NOT user/tenant-scoped — every authenticated
+# user sees the same global campaign list (the query filters only by
+# status/backend, never by created_by). The response therefore depends solely
+# on page/per_page/status/backend, so the list key captures exactly those
+# inputs and intentionally omits the user id. There is no cross-user leakage
+# because there is no per-user view to leak. If the list ever becomes
+# user-scoped, a ":user={user.id}" segment MUST be added to the list key.
+_CAMPAIGN_LIST_PREFIX = "campaigns:list:"
+
+
+def _list_cache_key(page: int, per_page: int, status: str | None, backend: str | None) -> str:
+    """Build the cache key for a GET /campaigns list response."""
+    return (
+        f"{_CAMPAIGN_LIST_PREFIX}page={page}:per_page={per_page}"
+        f":status={status or '*'}:backend={backend or '*'}"
+    )
+
+
+def _detail_cache_key(campaign_id) -> str:
+    """Build the cache key for a GET /campaigns/{id} detail response."""
+    return f"campaigns:detail:{campaign_id}"
+
+
+async def _invalidate_campaign_caches(campaign_id) -> None:
+    """Invalidate all cached reads affected by a mutation to *campaign_id*.
+
+    Drops the single detail key for the campaign and the entire list family
+    (every page/filter combination) so the next read repopulates from the DB.
+    Safe-on-failure: each cache op no-ops if Redis is unavailable.
+    """
+    cache = get_cache()
+    await cache.delete(_detail_cache_key(campaign_id))
+    await cache.invalidate_pattern(f"{_CAMPAIGN_LIST_PREFIX}*")
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +181,25 @@ async def list_campaigns(
     from src.db.models import Campaign, GeneratedAsset  # noqa: E402
     from sqlalchemy.orm import load_only  # noqa: E402
 
+    cache = get_cache()
+    status_val = status.value if status else None
+    cache_key = _list_cache_key(page, per_page, status_val, backend)
+
+    # Read-through: serve from cache on hit. We cache only the data payload
+    # (items + total), NOT the envelope's meta, so every response still gets a
+    # fresh request_id/timestamp.
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return PaginatedEnvelope[CampaignListItem](
+            data=[CampaignListItem.model_validate(item) for item in cached["items"]],
+            meta=PaginationMeta(
+                page=page,
+                per_page=per_page,
+                total=cached["total"],
+                total_pages=max(1, math.ceil(cached["total"] / per_page)),
+            ),
+        )
+
     # Build filter conditions once, reuse for both count and data queries
     filters = []
     if status:
@@ -191,6 +261,17 @@ async def list_campaigns(
         for c, ac in rows
     ]
 
+    # Populate cache with the data payload (items serialised via Pydantic so the
+    # JSON round-trips cleanly; total is needed to rebuild pagination meta).
+    await cache.set(
+        cache_key,
+        {
+            "items": [item.model_dump(mode="json") for item in items],
+            "total": total,
+        },
+        ttl=CAMPAIGN_CACHE_TTL_SECONDS,
+    )
+
     return PaginatedEnvelope[CampaignListItem](
         data=items,
         meta=PaginationMeta(
@@ -217,6 +298,7 @@ async def create_campaign(
     body: CampaignCreateRequest,
     user=Depends(require_role(["editor", "admin"])),
     db: AsyncSession = Depends(get_db),
+    pool=Depends(get_arq_pool),
 ):
     """Create a new campaign and queue a generation job."""
     from src.db.models import Campaign, Job  # noqa: E402
@@ -250,7 +332,38 @@ async def create_campaign(
     db.add(job)
     await db.flush()
 
-    logger.info("campaign.created", campaign_id=str(campaign.id), user_id=str(user.id))
+    # Capture ids before commit (expire_on_commit=False keeps the ORM objects
+    # usable, but the response payload only needs these strings to enqueue).
+    campaign_id_str = str(campaign.id)
+    job_id_str = str(job.id)
+
+    # Commit-then-enqueue: the Job/Campaign rows MUST be committed and visible
+    # before the job is enqueued, otherwise the worker can dequeue and query a
+    # row that isn't there yet (the enqueue racing the DB write). We commit
+    # explicitly here; the get_db dependency's end-of-request commit is then a
+    # harmless no-op.
+    await db.commit()
+
+    # Idempotent enqueue: _job_id == the DB job id, so a duplicate enqueue for
+    # the same job is deduped by ARQ (and by the recording fake pool in tests).
+    if pool is not None:
+        await pool.enqueue_job(
+            "process_campaign_job",
+            campaign_id_str,
+            job_id_str,
+            _job_id=job_id_str,
+        )
+
+    # Invalidate cached reads: the new campaign must appear in the list (and its
+    # detail must be fetchable) on the very next read, not after the TTL.
+    await _invalidate_campaign_caches(campaign_id_str)
+
+    logger.info(
+        "campaign.created",
+        campaign_id=campaign_id_str,
+        job_id=job_id_str,
+        user_id=str(user.id),
+    )
 
     return Envelope[CampaignResponse](
         data=_campaign_to_response(campaign, asset_count=0, job=job),
@@ -274,12 +387,30 @@ async def get_campaign(
     db: AsyncSession = Depends(get_db),
 ):
     """Return detailed information about a single campaign."""
+    cache = get_cache()
+    cache_key = _detail_cache_key(campaign_id)
+
+    # Read-through: serve the cached data payload on hit (meta stays fresh).
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return Envelope[CampaignResponse](
+            data=CampaignResponse.model_validate(cached),
+            meta=Meta(),
+        )
+
     campaign = await _get_campaign_or_404(campaign_id, db)
     ac = await _count_assets(campaign_id, db)
     job = await _latest_job(campaign_id, db)
 
+    response = _campaign_to_response(campaign, ac, job)
+    await cache.set(
+        cache_key,
+        response.model_dump(mode="json"),
+        ttl=CAMPAIGN_CACHE_TTL_SECONDS,
+    )
+
     return Envelope[CampaignResponse](
-        data=_campaign_to_response(campaign, ac, job),
+        data=response,
         meta=Meta(),
     )
 
@@ -318,6 +449,9 @@ async def update_campaign(
     ac = await _count_assets(campaign_id, db)
     job = await _latest_job(campaign_id, db)
 
+    # Invalidate so the updated fields are reflected on the next list/detail read.
+    await _invalidate_campaign_caches(str(campaign_id))
+
     logger.info("campaign.updated", campaign_id=str(campaign_id), fields=list(updates.keys()))
 
     return Envelope[CampaignResponse](
@@ -345,6 +479,10 @@ async def delete_campaign(
     campaign = await _get_campaign_or_404(campaign_id, db)
     await db.delete(campaign)
     await db.flush()
+
+    # Invalidate so the deleted campaign disappears from list/detail immediately.
+    await _invalidate_campaign_caches(str(campaign_id))
+
     logger.info("campaign.deleted", campaign_id=str(campaign_id), user_id=str(user.id))
 
 
@@ -362,6 +500,7 @@ async def reprocess_campaign(
     campaign_id: uuid.UUID,
     user=Depends(require_role(["editor", "admin"])),
     db: AsyncSession = Depends(get_db),
+    pool=Depends(get_arq_pool),
 ):
     """Queue a new generation job for an existing campaign."""
     from src.db.models import Job  # noqa: E402
@@ -381,7 +520,25 @@ async def reprocess_campaign(
     db.add(job)
     await db.flush()
 
-    logger.info("campaign.reprocess", campaign_id=str(campaign_id), job_id=str(job.id))
+    campaign_id_str = str(campaign.id)
+    job_id_str = str(job.id)
+
+    # Commit-then-enqueue (see create_campaign): the new Job row + the campaign
+    # status flip must be committed before the worker can pick the job up.
+    await db.commit()
+
+    if pool is not None:
+        await pool.enqueue_job(
+            "process_campaign_job",
+            campaign_id_str,
+            job_id_str,
+            _job_id=job_id_str,
+        )
+
+    # Status flipped to "processing" — invalidate so list/detail reflect it.
+    await _invalidate_campaign_caches(campaign_id_str)
+
+    logger.info("campaign.reprocess", campaign_id=campaign_id_str, job_id=job_id_str)
 
     return Envelope[JobResponse](
         data=JobResponse.model_validate(job),

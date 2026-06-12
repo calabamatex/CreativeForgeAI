@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
+
+from datetime import datetime, timezone
+
+from sqlalchemy import select
 
 from tests.integration.conftest import (
     CAMPAIGN_ID,
@@ -357,3 +361,380 @@ class TestDeleteCampaign:
         )
 
         assert resp.status_code == 404
+
+
+# ===================================================================
+# Enqueue wiring (P3-T1) -- REAL DB harness + recording fake ARQ pool
+# ===================================================================
+
+
+async def _seed_editor_and_headers(session) -> dict[str, str]:
+    """Seed a real editor user in the test DB and return a real Bearer header.
+
+    Mirrors the e2e test's approach (direct seed + mint, dodging the known
+    passlib/bcrypt env bug). Every subsequent request authenticates through the
+    real ``get_current_user`` against the real test DB.
+    """
+    import uuid as _uuid
+
+    from src.api.dependencies import create_access_token
+    from src.db.models import User
+
+    user = User(
+        id=_uuid.uuid4(),
+        email=f"enq-{_uuid.uuid4().hex[:8]}@example.com",
+        password_hash="$2b$12$placeholder.hash.value.not.used.for.jwt.login.flow",
+        display_name="Enqueue Editor",
+        role="editor",
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    session.add(user)
+    await session.flush()
+
+    token = create_access_token(str(user.id), user.role)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.integration
+class TestEnqueueOnCreate:
+    """POST /campaigns and /reprocess enqueue process_campaign_job (P3-T1)."""
+
+    async def test_create_enqueues_exactly_one_job_with_db_job_id(
+        self, real_app_client, fake_arq_pool
+    ):
+        """Creating a campaign enqueues exactly one job whose _job_id == db job id,
+        and the Job row is committed (queryable) before/at enqueue time.
+        """
+        from src.db.models import Job
+        from src.api.dependencies import get_arq_pool
+
+        client, session = real_app_client
+        headers = await _seed_editor_and_headers(session)
+
+        app = client._transport.app
+
+        async def _override_pool():
+            return fake_arq_pool
+
+        app.dependency_overrides[get_arq_pool] = _override_pool
+
+        campaign_key = f"ENQ-{uuid.uuid4().hex[:8]}"
+        resp = await client.post(
+            "/api/v1/campaigns",
+            headers=headers,
+            json={
+                "campaign_id": campaign_key,
+                "campaign_name": "Enqueue Test",
+                "brand_name": "TechStyle",
+                "image_backend": "firefly",
+                "brief": {"headline": "Go"},
+                "target_locales": ["en-US"],
+                "aspect_ratios": ["1:1"],
+            },
+        )
+
+        assert resp.status_code == 201, resp.text
+        data = resp.json()["data"]
+        job_db_id = data["latest_job"]["id"]
+        campaign_db_id = data["id"]
+
+        # Exactly one live enqueue, _job_id == the DB job id.
+        assert fake_arq_pool.live_job_ids() == [job_db_id]
+        assert fake_arq_pool.count_for_job_id(job_db_id) == 1
+
+        # The single recorded enqueue carries the right function + positional args.
+        record = fake_arq_pool.jobs_for("process_campaign_job")[0]
+        assert record.function_name == "process_campaign_job"
+        assert record.args == (campaign_db_id, job_db_id)
+        assert record.job_id == job_db_id
+
+        # Commit-then-enqueue proof: the Job row is committed and queryable via a
+        # FRESH query (not just pending in the unit-of-work).
+        row = (
+            await session.execute(
+                select(Job).where(Job.id == uuid.UUID(job_db_id))
+            )
+        ).scalar_one_or_none()
+        assert row is not None
+        assert row.status == "queued"
+
+    async def test_duplicate_enqueue_same_job_id_is_deduped(
+        self, real_app_client, fake_arq_pool
+    ):
+        """A second enqueue with the same _job_id is deduped (not run twice)."""
+        from src.api.dependencies import get_arq_pool
+
+        client, session = real_app_client
+        headers = await _seed_editor_and_headers(session)
+
+        app = client._transport.app
+
+        async def _override_pool():
+            return fake_arq_pool
+
+        app.dependency_overrides[get_arq_pool] = _override_pool
+
+        campaign_key = f"ENQ-{uuid.uuid4().hex[:8]}"
+        resp = await client.post(
+            "/api/v1/campaigns",
+            headers=headers,
+            json={
+                "campaign_id": campaign_key,
+                "campaign_name": "Dedupe Test",
+                "brand_name": "TechStyle",
+                "image_backend": "firefly",
+                "brief": {"headline": "Go"},
+                "target_locales": ["en-US"],
+                "aspect_ratios": ["1:1"],
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        job_db_id = resp.json()["data"]["latest_job"]["id"]
+        campaign_db_id = resp.json()["data"]["id"]
+
+        # Simulate a duplicate enqueue for the SAME job id (e.g. a retry/replay).
+        dup = await fake_arq_pool.enqueue_job(
+            "process_campaign_job",
+            campaign_db_id,
+            job_db_id,
+            _job_id=job_db_id,
+        )
+        # ARQ returns None when a job with this _job_id already exists.
+        assert dup is None
+        # Still exactly one LIVE job; the dupe is recorded as deduped.
+        assert fake_arq_pool.live_job_ids() == [job_db_id]
+        assert fake_arq_pool.count_for_job_id(job_db_id) == 2  # 1 live + 1 deduped
+
+    async def test_reprocess_enqueues_job(self, real_app_client, fake_arq_pool):
+        """Reprocessing a campaign enqueues exactly one job whose _job_id == db job id."""
+        import uuid as _uuid
+
+        from src.db.models import Campaign
+        from src.api.dependencies import get_arq_pool
+
+        client, session = real_app_client
+        headers = await _seed_editor_and_headers(session)
+
+        # Seed a campaign directly so we can reprocess it.
+        campaign = Campaign(
+            id=_uuid.uuid4(),
+            campaign_id=f"RP-{_uuid.uuid4().hex[:8]}",
+            campaign_name="Reprocess Me",
+            brand_name="TechStyle",
+            status="completed",
+            image_backend="firefly",
+            brief={"headline": "Go"},
+            target_locales=["en-US"],
+            aspect_ratios=["1:1"],
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(campaign)
+        await session.flush()
+        campaign_db_id = str(campaign.id)
+
+        app = client._transport.app
+
+        async def _override_pool():
+            return fake_arq_pool
+
+        app.dependency_overrides[get_arq_pool] = _override_pool
+
+        resp = await client.post(
+            f"/api/v1/campaigns/{campaign_db_id}/reprocess",
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        job_db_id = resp.json()["data"]["id"]
+
+        assert fake_arq_pool.live_job_ids() == [job_db_id]
+        assert fake_arq_pool.count_for_job_id(job_db_id) == 1
+        record = fake_arq_pool.jobs_for("process_campaign_job")[0]
+        assert record.args == (campaign_db_id, job_db_id)
+        assert record.job_id == job_db_id
+
+
+# ===================================================================
+# Read-through cache + invalidation (P3-T6)
+# ===================================================================
+#
+# These tests stand up a REAL RedisCache connected to the Compose Redis
+# (REDIS_URL, host port 6380) with a unique key prefix per test, and patch
+# ``src.api.routes.campaigns.get_cache`` to return it. The DB layer stays the
+# fully-mocked ``mock_db`` from ``authed_client`` so we can COUNT how many times
+# the route hits the DB: a second identical read must NOT touch the DB (served
+# from cache), and a mutation must invalidate so the DB is hit again.
+
+
+import os as _os
+
+import pytest_asyncio
+
+from src.cache import RedisCache
+
+
+@pytest_asyncio.fixture
+async def real_cache():
+    """A genuinely connected RedisCache (Compose Redis) with an isolated prefix.
+
+    Skips if Redis is unreachable so the suite still runs without the dev stack.
+    Flushes its own prefixed keys on teardown to avoid cross-test bleed.
+    """
+    url = _os.getenv("REDIS_URL", "redis://localhost:6380/0")
+    prefix = f"p3t6-test:{uuid.uuid4().hex[:8]}:"
+    cache = RedisCache(url=url, default_ttl=30, key_prefix=prefix)
+    await cache.connect()
+    if not cache.is_connected:
+        pytest.skip("Redis not reachable for cache test")
+    try:
+        yield cache
+    finally:
+        await cache.invalidate_pattern("*")
+        await cache.close()
+
+
+@pytest.mark.integration
+class TestCampaignReadCache:
+    """GET list/detail are read-through cached; mutations invalidate (P3-T6)."""
+
+    async def test_list_second_read_served_from_cache(self, authed_client, real_cache):
+        """Two identical list reads hit the DB only ONCE; the 2nd is a cache hit."""
+        from src.api.routes import campaigns as campaigns_route
+
+        ac, mock_db = authed_client
+        c1 = _make_campaign(campaign_id="C1", campaign_name="First")
+
+        # The list route issues 2 DB queries per uncached request: count + select.
+        # Provide exactly enough results for ONE uncached request; if the second
+        # request were to hit the DB it would raise StopAsyncIteration and fail.
+        _db_returning_sequence(mock_db, 1, [(c1, 0)])
+
+        with patch.object(campaigns_route, "get_cache", return_value=real_cache):
+            resp1 = await ac.get("/api/v1/campaigns?page=1&per_page=10")
+            assert resp1.status_code == 200
+            # DB was queried for the miss (count + select == 2 execute calls).
+            assert mock_db.execute.call_count == 2
+
+            # Prove a REAL cache entry now exists.
+            key = campaigns_route._list_cache_key(1, 10, None, None)
+            assert await real_cache.exists(key) is True
+
+            resp2 = await ac.get("/api/v1/campaigns?page=1&per_page=10")
+            assert resp2.status_code == 200
+            # No further DB queries: the second read was served from cache.
+            assert mock_db.execute.call_count == 2
+
+        # Identical data payload across both reads (meta differs by request_id).
+        assert resp1.json()["data"] == resp2.json()["data"]
+        assert resp2.json()["meta"]["total"] == 1
+
+    async def test_detail_second_read_served_from_cache(self, authed_client, real_cache):
+        """Two identical detail reads hit the DB only ONCE."""
+        from src.api.routes import campaigns as campaigns_route
+
+        ac, mock_db = authed_client
+        campaign = _make_campaign()
+        job = _make_job()
+
+        # Detail issues 3 queries on a miss: campaign lookup + count + latest job.
+        _db_returning_sequence(mock_db, campaign, 5, job)
+
+        with patch.object(campaigns_route, "get_cache", return_value=real_cache):
+            resp1 = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}")
+            assert resp1.status_code == 200
+            assert mock_db.execute.call_count == 3
+
+            assert await real_cache.exists(
+                campaigns_route._detail_cache_key(CAMPAIGN_ID)
+            ) is True
+
+            resp2 = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}")
+            assert resp2.status_code == 200
+            # Cache hit: no additional DB queries.
+            assert mock_db.execute.call_count == 3
+
+        assert resp1.json()["data"] == resp2.json()["data"]
+        assert resp2.json()["data"]["asset_count"] == 5
+
+    async def test_mutation_invalidates_list_cache(self, authed_client, real_cache):
+        """After a PATCH, the list cache is invalidated and the next read hits DB."""
+        from src.api.routes import campaigns as campaigns_route
+
+        ac, mock_db = authed_client
+        c1 = _make_campaign(status="draft", campaign_name="Before")
+        job = _make_job()
+
+        list_key = campaigns_route._list_cache_key(1, 10, None, None)
+
+        with patch.object(campaigns_route, "get_cache", return_value=real_cache):
+            # 1) Populate list cache (count + select).
+            _db_returning_sequence(mock_db, 1, [(c1, 0)])
+            r = await ac.get("/api/v1/campaigns?page=1&per_page=10")
+            assert r.status_code == 200
+            assert await real_cache.exists(list_key) is True
+
+            # 2) Mutate: PATCH the campaign (campaign lookup + count + latest job).
+            _db_returning_sequence(mock_db, c1, 0, job)
+            patch_resp = await ac.patch(
+                f"/api/v1/campaigns/{CAMPAIGN_ID}",
+                json={"campaign_name": "After"},
+                headers=admin_headers(),
+            )
+            assert patch_resp.status_code == 200
+
+            # 3) List cache must have been invalidated by the mutation.
+            assert await real_cache.exists(list_key) is False
+
+            # 4) Next list read therefore hits the DB again (count + select).
+            c1.campaign_name = "After"
+            _db_returning_sequence(mock_db, 1, [(c1, 0)])
+            r2 = await ac.get("/api/v1/campaigns?page=1&per_page=10")
+            assert r2.status_code == 200
+            assert r2.json()["data"][0]["campaign_name"] == "After"
+
+    async def test_mutation_invalidates_detail_cache(self, authed_client, real_cache):
+        """After a PATCH, the detail cache key for that campaign is invalidated."""
+        from src.api.routes import campaigns as campaigns_route
+
+        ac, mock_db = authed_client
+        campaign = _make_campaign(status="draft")
+        job = _make_job()
+        detail_key = campaigns_route._detail_cache_key(CAMPAIGN_ID)
+
+        with patch.object(campaigns_route, "get_cache", return_value=real_cache):
+            # Populate detail cache.
+            _db_returning_sequence(mock_db, campaign, 5, job)
+            r = await ac.get(f"/api/v1/campaigns/{CAMPAIGN_ID}")
+            assert r.status_code == 200
+            assert await real_cache.exists(detail_key) is True
+
+            # Mutate.
+            _db_returning_sequence(mock_db, campaign, 0, job)
+            patch_resp = await ac.patch(
+                f"/api/v1/campaigns/{CAMPAIGN_ID}",
+                json={"campaign_name": "Changed"},
+                headers=admin_headers(),
+            )
+            assert patch_resp.status_code == 200
+
+            # Detail key gone -> next read repopulates from DB.
+            assert await real_cache.exists(detail_key) is False
+
+    async def test_endpoints_work_with_cache_unavailable(self, authed_client):
+        """Safe-on-failure: with a DISCONNECTED cache the endpoints still serve."""
+        from src.api.routes import campaigns as campaigns_route
+
+        ac, mock_db = authed_client
+        c1 = _make_campaign()
+
+        # A RedisCache that was never connected -> every op no-ops (None/False).
+        down_cache = RedisCache(url="redis://127.0.0.1:1/0")
+        assert down_cache.is_connected is False
+
+        with patch.object(campaigns_route, "get_cache", return_value=down_cache):
+            _db_returning_sequence(mock_db, 1, [(c1, 0)])
+            resp = await ac.get("/api/v1/campaigns?page=1&per_page=10")
+            assert resp.status_code == 200
+            assert resp.json()["meta"]["total"] == 1
