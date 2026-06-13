@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.authz import get_owned_campaign
 from src.api.dependencies import (
     check_rate_limit,
     get_current_user,
@@ -32,17 +33,6 @@ router = APIRouter(tags=["compliance"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-async def _get_campaign_or_404(campaign_id: uuid.UUID, db: AsyncSession):
-    from src.db.models import Campaign  # noqa: E402
-
-    stmt = select(Campaign).where(Campaign.id == campaign_id)
-    result = await db.execute(stmt)
-    campaign = result.scalar_one_or_none()
-    if campaign is None:
-        raise NotFoundError("Campaign", str(campaign_id))
-    return campaign
 
 
 async def _get_latest_report(campaign_id: uuid.UUID, db: AsyncSession):
@@ -221,7 +211,7 @@ async def get_compliance_report(
     db: AsyncSession = Depends(get_db),
 ):
     """Return the latest compliance report for a campaign, or null if none exists."""
-    await _get_campaign_or_404(campaign_id, db)
+    await get_owned_campaign(campaign_id, user, db)
     report = await _get_latest_report(campaign_id, db)
 
     data = ComplianceReportResponse.model_validate(report) if report else None
@@ -248,7 +238,7 @@ async def run_compliance_check(
     """Execute a compliance check against campaign content and store the report."""
     from src.db.models import ComplianceReport  # noqa: E402
 
-    campaign = await _get_campaign_or_404(campaign_id, db)
+    campaign = await get_owned_campaign(campaign_id, user, db)
     check_result = await _run_compliance_check(campaign, db)
 
     now = datetime.now(UTC)
@@ -298,7 +288,7 @@ async def approve_compliance(
     This overrides ``is_compliant`` to ``True`` and records approval notes
     in the summary.
     """
-    await _get_campaign_or_404(campaign_id, db)
+    await get_owned_campaign(campaign_id, user, db)
     report = await _get_latest_report(campaign_id, db)
 
     if report is None:

@@ -1,0 +1,14 @@
+# Gitleaks configuration — extends the default ruleset with a narrow
+# allowlist for known false positives in git history.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives"
+paths = [
+    # Documentation placeholder ("private_key_hex: \"ed25519_private_key\"")
+    # in a vendored agent doc present only in the initial commit; the file is
+    # no longer tracked. Not a real secret.
+    '''\.claude/agents/payments/agentic-payments\.md''',
+]

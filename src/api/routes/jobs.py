@@ -11,13 +11,14 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.authz import get_owned_job, owned_campaign_ids_subquery
 from src.api.dependencies import (
     check_rate_limit,
     get_current_user,
     get_db,
     require_role,
 )
-from src.api.errors import BadRequestError, NotFoundError
+from src.api.errors import BadRequestError
 from src.api.schemas import (
     Envelope,
     JobResponse,
@@ -30,22 +31,6 @@ from src.api.schemas import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-async def _get_job_or_404(job_id: uuid.UUID, db: AsyncSession):
-    from src.db.models import Job  # noqa: E402
-
-    stmt = select(Job).where(Job.id == job_id)
-    result = await db.execute(stmt)
-    job = result.scalar_one_or_none()
-    if job is None:
-        raise NotFoundError("Job", str(job_id))
-    return job
 
 
 # ---------------------------------------------------------------------------
@@ -66,11 +51,20 @@ async def list_jobs(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List jobs with pagination and optional filters."""
+    """List jobs with pagination and optional filters (tenant-scoped).
+
+    Jobs have no owner column; ownership derives from the parent campaign's
+    ``created_by``. Non-admins see only jobs of campaigns they own.
+    """
     from src.db.models import Job  # noqa: E402
 
     base = select(Job)
     count_q = select(func.count()).select_from(Job)
+
+    owned = owned_campaign_ids_subquery(user)
+    if owned is not None:
+        base = base.where(Job.campaign_id.in_(owned))
+        count_q = count_q.where(Job.campaign_id.in_(owned))
 
     if status:
         base = base.where(Job.status == status.value)
@@ -110,7 +104,7 @@ async def get_job(
     db: AsyncSession = Depends(get_db),
 ):
     """Return the current status of a single job."""
-    job = await _get_job_or_404(job_id, db)
+    job = await get_owned_job(job_id, user, db)
     return Envelope[JobResponse](
         data=JobResponse.model_validate(job),
         meta=Meta(),
@@ -133,7 +127,7 @@ async def cancel_job(
     db: AsyncSession = Depends(get_db),
 ):
     """Cancel a queued or running job."""
-    job = await _get_job_or_404(job_id, db)
+    job = await get_owned_job(job_id, user, db)
 
     terminal_states = {
         JobStatus.COMPLETED.value,

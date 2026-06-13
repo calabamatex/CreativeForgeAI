@@ -12,13 +12,14 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.authz import get_owned_brand, is_admin
 from src.api.dependencies import (
     check_rate_limit,
     get_current_user,
     get_db,
     require_role,
 )
-from src.api.errors import BadRequestError, NotFoundError
+from src.api.errors import BadRequestError
 from src.api.schemas import (
     BrandCreateRequest,
     BrandResponse,
@@ -38,17 +39,6 @@ router = APIRouter(prefix="/brands", tags=["brands"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-async def _get_brand_or_404(brand_id: uuid.UUID, db: AsyncSession):
-    from src.db.models import BrandGuideline  # noqa: E402
-
-    stmt = select(BrandGuideline).where(BrandGuideline.id == brand_id)
-    result = await db.execute(stmt)
-    brand = result.scalar_one_or_none()
-    if brand is None:
-        raise NotFoundError("Brand", str(brand_id))
-    return brand
 
 
 async def _extract_guidelines(file_path: str) -> dict:
@@ -87,15 +77,23 @@ async def list_brands(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all brand guideline entries with pagination."""
+    """List brand guideline entries with pagination (tenant-scoped).
+
+    Non-admins see only brands they created; admins see all. NULL-owned
+    (legacy) rows are admin-only.
+    """
     from src.db.models import BrandGuideline  # noqa: E402
 
-    total = (await db.execute(select(func.count()).select_from(BrandGuideline))).scalar_one()
-    total_pages = max(1, math.ceil(total / per_page))
-
+    count_q = select(func.count()).select_from(BrandGuideline)
     stmt = (
         select(BrandGuideline).order_by(BrandGuideline.created_at.desc()).offset((page - 1) * per_page).limit(per_page)
     )
+    if not is_admin(user):
+        count_q = count_q.where(BrandGuideline.created_by == user.id)
+        stmt = stmt.where(BrandGuideline.created_by == user.id)
+
+    total = (await db.execute(count_q)).scalar_one()
+    total_pages = max(1, math.ceil(total / per_page))
     result = await db.execute(stmt)
     brands = result.scalars().all()
 
@@ -202,7 +200,7 @@ async def get_brand(
     db: AsyncSession = Depends(get_db),
 ):
     """Return detail for a single brand guideline entry."""
-    brand = await _get_brand_or_404(brand_id, db)
+    brand = await get_owned_brand(brand_id, user, db)
     return Envelope[BrandResponse](
         data=BrandResponse.model_validate(brand),
         meta=Meta(),
@@ -226,7 +224,7 @@ async def update_brand(
     db: AsyncSession = Depends(get_db),
 ):
     """Update overrides on an existing brand guideline entry."""
-    brand = await _get_brand_or_404(brand_id, db)
+    brand = await get_owned_brand(brand_id, user, db)
 
     updates = body.model_dump(exclude_unset=True)
     for field, value in updates.items():
@@ -258,7 +256,7 @@ async def delete_brand(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a brand guideline entry (Admin only)."""
-    brand = await _get_brand_or_404(brand_id, db)
+    brand = await get_owned_brand(brand_id, user, db)
     await db.delete(brand)
     await db.flush()
     logger.info("brand.deleted", brand_id=str(brand_id), user_id=str(user.id))

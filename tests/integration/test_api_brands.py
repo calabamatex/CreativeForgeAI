@@ -322,8 +322,8 @@ class TestBrandCRUDCycle:
         )
         assert resp.status_code == 201
 
-        # READ
-        mock_db.execute = AsyncMock(return_value=FakeScalarResult(brand))
+        # READ (user lookup, then owned-brand lookup)
+        _db_returning_sequence(mock_db, admin_user, brand)
         resp = await client.get(
             f"/api/v1/brands/{BRAND_ID}",
             headers=admin_headers(),

@@ -85,6 +85,12 @@ class BrandGuideline(Base):
     creator: Mapped[Optional["User"]] = relationship(back_populates="brand_guidelines", lazy="selectin")
     campaigns: Mapped[list["Campaign"]] = relationship(back_populates="brand_guidelines", lazy="raise")
 
+    __table_args__ = (
+        # Tenant scoping filters brand reads by owner for every non-admin
+        # request (list WHERE + ownership checks), so this column is hot.
+        Index("ix_brand_guidelines_created_by", "created_by"),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Campaigns

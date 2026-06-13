@@ -140,7 +140,11 @@ async def register(
     stmt = select(User).where(User.email == body.email)
     existing = (await db.execute(stmt)).scalar_one_or_none()
     if existing is not None:
-        raise ConflictError(detail=f"Email '{body.email}' is already registered")
+        # Generic message — do not echo the email back. (NOTE: the 409 status
+        # itself still confirms the account exists; a fully neutral register
+        # flow requires verification emails, which is out of scope here. The
+        # endpoint is rate-limited, which bounds bulk enumeration.)
+        raise ConflictError(detail="Registration could not be completed with the provided details")
 
     now = datetime.now(UTC)
     user = User(
@@ -168,6 +172,19 @@ async def register(
 # POST /auth/login
 # ---------------------------------------------------------------------------
 
+# Cached bcrypt hash of a throwaway value, used to equalize login timing when
+# the account does not exist (see login()). Computed lazily on first miss
+# rather than at import (a cost-12 bcrypt hash takes ~250ms — too slow for
+# module import) and cached for the process lifetime.
+_DUMMY_HASH_CACHE: str | None = None
+
+
+def _dummy_password_hash() -> str:
+    global _DUMMY_HASH_CACHE
+    if _DUMMY_HASH_CACHE is None:
+        _DUMMY_HASH_CACHE = hash_password("timing-equalizer-dummy-password")
+    return _DUMMY_HASH_CACHE
+
 
 @router.post(
     "/login",
@@ -188,7 +205,14 @@ async def login(
     stmt = select(User).where(User.email == body.email)
     user = (await db.execute(stmt)).scalar_one_or_none()
 
-    if user is None or not verify_password(body.password, user.password_hash):
+    if user is None:
+        # Timing equalizer: run the same bcrypt comparison a real lookup
+        # would, so a missing account is not distinguishable from a wrong
+        # password by response time (user enumeration via timing).
+        verify_password(body.password, _dummy_password_hash())
+        raise AuthenticationError("Invalid email or password")
+
+    if not verify_password(body.password, user.password_hash):
         raise AuthenticationError("Invalid email or password")
 
     if not user.is_active:

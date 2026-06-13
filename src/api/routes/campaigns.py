@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.authz import get_owned_campaign, is_admin
 from src.api.dependencies import (
     check_rate_limit,
     get_arq_pool,
@@ -49,22 +50,25 @@ router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 CAMPAIGN_CACHE_TTL_SECONDS: int = 30
 
 # Key scheme (all under the cache's global prefix, e.g. "adobegenai:"):
-#   List family:  "campaigns:list:page={p}:per_page={pp}:status={s}:backend={b}"
+#   List family:  "campaigns:list:scope={user_id|*}:page={p}:per_page={pp}:status={s}:backend={b}"
 #   Detail:       "campaigns:detail:{campaign_id}"
 #
-# Scoping note: GET /campaigns is NOT user/tenant-scoped — every authenticated
-# user sees the same global campaign list (the query filters only by
-# status/backend, never by created_by). The response therefore depends solely
-# on page/per_page/status/backend, so the list key captures exactly those
-# inputs and intentionally omits the user id. There is no cross-user leakage
-# because there is no per-user view to leak. If the list ever becomes
-# user-scoped, a ":user={user.id}" segment MUST be added to the list key.
+# Scoping note: GET /campaigns is tenant-scoped — non-admins see only their
+# own campaigns (created_by == user.id), admins see all. The list key
+# therefore carries a scope segment: the caller's user id, or "*" for the
+# admin (all-campaigns) view, so per-user views never collide in the cache.
+# The detail key stays per-campaign: the cached payload includes created_by,
+# and the handler re-checks ownership against it on every cache hit before
+# serving, so a shared detail entry cannot leak across users.
 _CAMPAIGN_LIST_PREFIX = "campaigns:list:"
 
 
-def _list_cache_key(page: int, per_page: int, status: str | None, backend: str | None) -> str:
+def _list_cache_key(scope: str, page: int, per_page: int, status: str | None, backend: str | None) -> str:
     """Build the cache key for a GET /campaigns list response."""
-    return f"{_CAMPAIGN_LIST_PREFIX}page={page}:per_page={per_page}:status={status or '*'}:backend={backend or '*'}"
+    return (
+        f"{_CAMPAIGN_LIST_PREFIX}scope={scope}:"
+        f"page={page}:per_page={per_page}:status={status or '*'}:backend={backend or '*'}"
+    )
 
 
 def _detail_cache_key(campaign_id) -> str:
@@ -87,24 +91,6 @@ async def _invalidate_campaign_caches(campaign_id) -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-async def _get_campaign_or_404(campaign_id: uuid.UUID, db: AsyncSession):
-    """Load a campaign by primary key, raising 404 if missing.
-
-    Uses selectinload for the jobs relationship since it is commonly
-    accessed right after fetching the campaign (e.g. latest_job lookup).
-    """
-    from sqlalchemy.orm import selectinload  # noqa: E402
-
-    from src.db.models import Campaign  # noqa: E402
-
-    stmt = select(Campaign).where(Campaign.id == campaign_id).options(selectinload(Campaign.jobs))
-    result = await db.execute(stmt)
-    campaign = result.scalar_one_or_none()
-    if campaign is None:
-        raise NotFoundError("Campaign", str(campaign_id))
-    return campaign
 
 
 async def _count_assets(campaign_id: uuid.UUID, db: AsyncSession) -> int:
@@ -173,7 +159,8 @@ async def list_campaigns(
 
     cache = get_cache()
     status_val = status.value if status else None
-    cache_key = _list_cache_key(page, per_page, status_val, backend)
+    scope = "*" if is_admin(user) else str(user.id)
+    cache_key = _list_cache_key(scope, page, per_page, status_val, backend)
 
     # Read-through: serve from cache on hit. We cache only the data payload
     # (items + total), NOT the envelope's meta, so every response still gets a
@@ -192,6 +179,10 @@ async def list_campaigns(
 
     # Build filter conditions once, reuse for both count and data queries
     filters = []
+    if not is_admin(user):
+        # Tenant scoping: non-admins see only campaigns they created. Rows
+        # with a NULL created_by (legacy/unowned) are admin-only by design.
+        filters.append(Campaign.created_by == user.id)
     if status:
         filters.append(Campaign.status == status.value)
     if backend:
@@ -383,14 +374,21 @@ async def get_campaign(
     cache_key = _detail_cache_key(campaign_id)
 
     # Read-through: serve the cached data payload on hit (meta stays fresh).
+    # The detail key is shared across users, so ownership MUST be re-checked
+    # against the cached created_by before serving — a cache hit must never
+    # bypass tenant scoping. Non-owned (or NULL-owned, for non-admins) is a
+    # 404, exactly like the DB path.
     cached = await cache.get(cache_key)
     if cached is not None:
+        owner = cached.get("created_by")
+        if not is_admin(user) and (owner is None or owner != str(user.id)):
+            raise NotFoundError("Campaign", str(campaign_id))
         return Envelope[CampaignResponse](
             data=CampaignResponse.model_validate(cached),
             meta=Meta(),
         )
 
-    campaign = await _get_campaign_or_404(campaign_id, db)
+    campaign = await get_owned_campaign(campaign_id, user, db, with_jobs=True)
     ac = await _count_assets(campaign_id, db)
     job = await _latest_job(campaign_id, db)
 
@@ -424,7 +422,7 @@ async def update_campaign(
     db: AsyncSession = Depends(get_db),
 ):
     """Update a campaign (only allowed while it is in *draft* status)."""
-    campaign = await _get_campaign_or_404(campaign_id, db)
+    campaign = await get_owned_campaign(campaign_id, user, db, with_jobs=True)
 
     if campaign.status != CampaignStatus.DRAFT.value:
         raise BadRequestError(detail="Only campaigns in 'draft' status can be updated")
@@ -466,7 +464,7 @@ async def delete_campaign(
     db: AsyncSession = Depends(get_db),
 ):
     """Permanently delete a campaign (Admin only)."""
-    campaign = await _get_campaign_or_404(campaign_id, db)
+    campaign = await get_owned_campaign(campaign_id, user, db, with_jobs=True)
     await db.delete(campaign)
     await db.flush()
 
@@ -495,7 +493,7 @@ async def reprocess_campaign(
     """Queue a new generation job for an existing campaign."""
     from src.db.models import Job  # noqa: E402
 
-    campaign = await _get_campaign_or_404(campaign_id, db)
+    campaign = await get_owned_campaign(campaign_id, user, db, with_jobs=True)
 
     campaign.status = CampaignStatus.PROCESSING.value
     campaign.updated_at = datetime.now(UTC)

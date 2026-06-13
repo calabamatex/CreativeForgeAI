@@ -188,6 +188,19 @@ jobs:
             | grep -q "test_e2e_campaign_enqueue_persist_retrieve" \
             || { echo "::error::e2e regression test is not in the default CI selection"; exit 1; }
 
+      # Guard the cross-tenant authorization suite the same way: it encodes the
+      # tenant-scoping trust model (the original BOLA finding shipped because no
+      # test asserted isolation). Fail the gate if it is ever dropped or renamed
+      # out of the default selection.
+      - name: Assert authz regression suite is in the gate
+        run: |
+          count=$(pytest tests/integration/test_api_authz.py -m "not paid" --collect-only -q 2>/dev/null \
+            | grep -c "test_cross_tenant" || true)
+          if [ "$count" -lt 10 ]; then
+            echo "::error::cross-tenant authz regression suite is not in the default CI selection (found $count cases)"
+            exit 1
+          fi
+
       - name: Run tests with coverage
         run: |
           pytest -m "not paid" \
@@ -219,6 +232,79 @@ jobs:
           python-version: "3.12"
       - run: pip install bandit
       - run: bandit -r src/ -ll -q
+
+  # ---------------------------------------------------------------------------
+  # SAST (GitHub CodeQL) over Python + JS/TS.
+  # ---------------------------------------------------------------------------
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@v3
+
+  # ---------------------------------------------------------------------------
+  # Dependency vulnerability scanning.
+  #
+  # Python: pip-audit over the installed environment (blocking — currently
+  # clean, so any failure is a NEW advisory worth stopping for).
+  # Frontend: `npm audit` gates HIGH+ findings in PRODUCTION deps only;
+  # dev-dependency findings (e.g. the vite/esbuild dev-server advisory whose
+  # fix is a breaking major bump) are reported but advisory.
+  # ---------------------------------------------------------------------------
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project dependencies
+        run: pip install -e ".[api,worker,s3]"
+      - name: pip-audit (blocking)
+        run: |
+          pip install pip-audit
+          pip-audit --skip-editable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm ci
+        working-directory: frontend
+        run: npm ci
+      - name: npm audit — production deps (blocking, high+)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit — all deps (advisory)
+        working-directory: frontend
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+  # ---------------------------------------------------------------------------
+  # Secret scanning (gitleaks) over the full git history of the ref.
+  # Runs the gitleaks binary directly (no org license needed, unlike
+  # gitleaks-action on organization repos).
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source /repo --config /repo/.gitleaks.toml --redact -v
 
   # ---------------------------------------------------------------------------
   # Frontend build (only if a frontend exists).
