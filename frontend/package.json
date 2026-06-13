@@ -12,11 +12,8 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^3.6.0",
-    "@rollup/rollup-darwin-arm64": "^4.60.0",
-    "@tailwindcss/oxide-darwin-arm64": "^4.2.2",
     "@tanstack/react-query": "^5.50.0",
     "clsx": "^2.1.0",
-    "lightningcss-darwin-arm64": "^1.32.0",
     "lucide-react": "^0.400.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

@@ -128,3 +128,6 @@ examples/*_20*T*.json
 
 # TypeScript incremental build state (build artifact; do not commit)
 *.tsbuildinfo
+
+# npm config — may hold a registry _authToken; never commit
+.npmrc
